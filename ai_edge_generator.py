@@ -115,12 +115,12 @@ PALETTE = {
     ],
 
     "blue": [
-        "#0E0A27",
-        "#0031BB",
-        "#0043FF",
-        "#85ABFF",
-        "#AFC8FF",
-        "#DBE6FF",
+        "#173736",
+        "#2C615F",
+        "#449491",
+        "#6BB3B0",
+        "#98C2C0",
+        "#CFD4D3",
     ],
 
     "red": [
@@ -176,8 +176,8 @@ AI_GRADIENTS = [
 
     # pale blue -> electric blue
     (
-        "#AFC8FF",
-        "#0043FF",
+        "#CFD4D3",
+        "#449491",
     ),
 ]
 
