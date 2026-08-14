@@ -4,6 +4,8 @@ import streamlit as st
 
 from ai_edge_generator import generate_ai_edge_pattern
 from vital_edge_generator import generate_vital_edge_pattern
+from ai_edge_svg import generate_ai_edge_svg
+from vital_edge_svg import generate_vital_edge_svg
 
 
 st.set_page_config(
@@ -55,16 +57,49 @@ if st.button(
         f"Generating {franchise} pattern..."
     ):
 
+        # ----------------------------
+        # PNG
+        # ----------------------------
+
         if franchise == "AI Edge":
             image, metadata = generate_ai_edge_pattern(
                 int(width),
                 int(height),
             )
+
+            png_filename = "ai_edge_pattern.png"
+
         else:
             image, metadata = generate_vital_edge_pattern(
                 int(width),
                 int(height),
             )
+
+            png_filename = "vital_edge_pattern.png"
+
+        # ----------------------------
+        # SVG
+        # ----------------------------
+
+        if franchise == "AI Edge":
+            svg_string, svg_metadata = generate_ai_edge_svg(
+                int(width),
+                int(height),
+            )
+
+            svg_filename = "ai_edge_pattern.svg"
+
+        else:
+            svg_string, svg_metadata = generate_vital_edge_svg(
+                int(width),
+                int(height),
+            )
+
+            svg_filename = "vital_edge_pattern.svg"
+
+    # ----------------------------
+    # Preview
+    # ----------------------------
 
     st.image(
         image,
@@ -72,23 +107,33 @@ if st.button(
         use_container_width=True,
     )
 
-    buffer = io.BytesIO()
+    # ----------------------------
+    # PNG download
+    # ----------------------------
+
+    png_buffer = io.BytesIO()
 
     image.save(
-        buffer,
+        png_buffer,
         format="PNG",
-    )
-
-    filename = (
-        "ai_edge_pattern.png"
-        if franchise == "AI Edge"
-        else "vital_edge_pattern.png"
     )
 
     st.download_button(
         label="Download PNG",
-        data=buffer.getvalue(),
-        file_name=filename,
+        data=png_buffer.getvalue(),
+        file_name=png_filename,
         mime="image/png",
+        use_container_width=True,
+    )
+
+    # ----------------------------
+    # SVG download
+    # ----------------------------
+
+    st.download_button(
+        label="Download SVG",
+        data=svg_string,
+        file_name=svg_filename,
+        mime="image/svg+xml",
         use_container_width=True,
     )
