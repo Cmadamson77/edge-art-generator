@@ -2,14 +2,22 @@ import io
 
 import streamlit as st
 
-from ai_edge_generator import generate_ai_edge_pattern
-from vital_edge_generator import generate_vital_edge_pattern
+from ai_edge_matched_export import (
+    generate_ai_edge_matched,
+)
+
+from vital_edge_generator import (
+    generate_vital_edge_pattern,
+)
 
 from production_vector import (
-    generate_ai_edge_production_vector,
     generate_vital_edge_production_vector,
 )
 
+
+# ============================================================
+# PAGE
+# ============================================================
 
 st.set_page_config(
     page_title="Edge Art Generator",
@@ -40,10 +48,12 @@ franchise = st.selectbox(
 
 
 # ============================================================
-# SIZE
+# DIMENSIONS
 # ============================================================
 
-col1, col2 = st.columns(2)
+col1, col2 = st.columns(
+    2
+)
 
 with col1:
 
@@ -80,23 +90,46 @@ if st.button(
     ):
 
         # ====================================================
-        # PNG
+        # AI EDGE
         #
-        # UNCHANGED EXISTING PILLOW GENERATOR
+        # PNG + PRODUCTION VECTOR ARE GENERATED FROM
+        # THE SAME RANDOM SEED AND COMPOSITION.
         # ====================================================
 
         if franchise == "AI Edge":
 
-            image, metadata = (
-                generate_ai_edge_pattern(
-                    int(width),
-                    int(height),
-                )
+            (
+                image,
+                metadata,
+                production_vector,
+                vector_metadata,
+            ) = generate_ai_edge_matched(
+                int(width),
+                int(height),
             )
 
+            seed = metadata[
+                "seed"
+            ]
+
             png_filename = (
-                "ai_edge_pattern.png"
+                f"ai_edge_pattern_"
+                f"{seed}.png"
             )
+
+            vector_filename = (
+                f"ai_edge_production_vector_"
+                f"{seed}.svg"
+            )
+
+        # ====================================================
+        # VITAL EDGE
+        #
+        # TEMPORARILY PRESERVES CURRENT GENERATORS.
+        #
+        # We will convert this to the same matched system
+        # after validating AI Edge in Illustrator.
+        # ====================================================
 
         else:
 
@@ -107,37 +140,18 @@ if st.button(
                 )
             )
 
-            png_filename = (
-                "vital_edge_pattern.png"
-            )
-
-
-        # ====================================================
-        # PRODUCTION VECTOR
-        #
-        # CLEAN VECTOR GENERATOR
-        # ====================================================
-
-        if franchise == "AI Edge":
-
-            production_vector, vector_metadata = (
-                generate_ai_edge_production_vector(
-                    int(width),
-                    int(height),
-                )
-            )
-
-            vector_filename = (
-                "ai_edge_production_vector.svg"
-            )
-
-        else:
-
-            production_vector, vector_metadata = (
+            (
+                production_vector,
+                vector_metadata,
+            ) = (
                 generate_vital_edge_production_vector(
                     int(width),
                     int(height),
                 )
+            )
+
+            png_filename = (
+                "vital_edge_pattern.png"
             )
 
             vector_filename = (
@@ -157,7 +171,7 @@ if st.button(
 
 
     # ========================================================
-    # PNG
+    # PNG BUFFER
     # ========================================================
 
     png_buffer = io.BytesIO()
@@ -166,6 +180,11 @@ if st.button(
         png_buffer,
         format="PNG",
     )
+
+
+    # ========================================================
+    # DOWNLOAD PNG
+    # ========================================================
 
     st.download_button(
         label="Download PNG",
@@ -177,7 +196,7 @@ if st.button(
 
 
     # ========================================================
-    # PRODUCTION VECTOR
+    # DOWNLOAD PRODUCTION VECTOR
     # ========================================================
 
     st.download_button(
