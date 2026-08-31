@@ -4,8 +4,11 @@ import streamlit as st
 
 from ai_edge_generator import generate_ai_edge_pattern
 from vital_edge_generator import generate_vital_edge_pattern
-from ai_edge_svg import generate_ai_edge_svg
-from vital_edge_svg import generate_vital_edge_svg
+
+from production_vector import (
+    generate_ai_edge_production_vector,
+    generate_vital_edge_production_vector,
+)
 
 
 st.set_page_config(
@@ -14,11 +17,18 @@ st.set_page_config(
     layout="centered",
 )
 
-st.title("Edge Art Generator")
+st.title(
+    "Edge Art Generator"
+)
 
 st.write(
     "Generate a new branded pattern for the Edge franchise."
 )
+
+
+# ============================================================
+# FRANCHISE
+# ============================================================
 
 franchise = st.selectbox(
     "Franchise",
@@ -28,9 +38,15 @@ franchise = st.selectbox(
     ],
 )
 
+
+# ============================================================
+# SIZE
+# ============================================================
+
 col1, col2 = st.columns(2)
 
 with col1:
+
     width = st.number_input(
         "Width (px)",
         min_value=300,
@@ -40,6 +56,7 @@ with col1:
     )
 
 with col2:
+
     height = st.number_input(
         "Height (px)",
         min_value=300,
@@ -47,6 +64,11 @@ with col2:
         value=1600,
         step=100,
     )
+
+
+# ============================================================
+# GENERATE
+# ============================================================
 
 if st.button(
     "Generate Pattern",
@@ -57,49 +79,75 @@ if st.button(
         f"Generating {franchise} pattern..."
     ):
 
-        # ----------------------------
+        # ====================================================
         # PNG
-        # ----------------------------
+        #
+        # UNCHANGED EXISTING PILLOW GENERATOR
+        # ====================================================
 
         if franchise == "AI Edge":
-            image, metadata = generate_ai_edge_pattern(
-                int(width),
-                int(height),
+
+            image, metadata = (
+                generate_ai_edge_pattern(
+                    int(width),
+                    int(height),
+                )
             )
 
-            png_filename = "ai_edge_pattern.png"
+            png_filename = (
+                "ai_edge_pattern.png"
+            )
 
         else:
-            image, metadata = generate_vital_edge_pattern(
-                int(width),
-                int(height),
+
+            image, metadata = (
+                generate_vital_edge_pattern(
+                    int(width),
+                    int(height),
+                )
             )
 
-            png_filename = "vital_edge_pattern.png"
+            png_filename = (
+                "vital_edge_pattern.png"
+            )
 
-        # ----------------------------
-        # SVG
-        # ----------------------------
+
+        # ====================================================
+        # PRODUCTION VECTOR
+        #
+        # CLEAN VECTOR GENERATOR
+        # ====================================================
 
         if franchise == "AI Edge":
-            svg_string, svg_metadata = generate_ai_edge_svg(
-                int(width),
-                int(height),
+
+            production_vector, vector_metadata = (
+                generate_ai_edge_production_vector(
+                    int(width),
+                    int(height),
+                )
             )
 
-            svg_filename = "ai_edge_pattern.svg"
+            vector_filename = (
+                "ai_edge_production_vector.svg"
+            )
 
         else:
-            svg_string, svg_metadata = generate_vital_edge_svg(
-                int(width),
-                int(height),
+
+            production_vector, vector_metadata = (
+                generate_vital_edge_production_vector(
+                    int(width),
+                    int(height),
+                )
             )
 
-            svg_filename = "vital_edge_pattern.svg"
+            vector_filename = (
+                "vital_edge_production_vector.svg"
+            )
 
-    # ----------------------------
-    # Preview
-    # ----------------------------
+
+    # ========================================================
+    # PREVIEW
+    # ========================================================
 
     st.image(
         image,
@@ -107,9 +155,10 @@ if st.button(
         use_container_width=True,
     )
 
-    # ----------------------------
-    # PNG download
-    # ----------------------------
+
+    # ========================================================
+    # PNG
+    # ========================================================
 
     png_buffer = io.BytesIO()
 
@@ -126,14 +175,15 @@ if st.button(
         use_container_width=True,
     )
 
-    # ----------------------------
-    # SVG download
-    # ----------------------------
+
+    # ========================================================
+    # PRODUCTION VECTOR
+    # ========================================================
 
     st.download_button(
-        label="Download SVG",
-        data=svg_string,
-        file_name=svg_filename,
+        label="Download Production Vector",
+        data=production_vector,
+        file_name=vector_filename,
         mime="image/svg+xml",
         use_container_width=True,
     )
