@@ -74,10 +74,10 @@ SEED = None
 # ------------------------------------------------------------
 
 # Requested approximately 30–40%.
-TRUE_GRADIENT_REGION_PROBABILITY = 0.36
+TRUE_GRADIENT_REGION_PROBABILITY = 0.0
 
 # Shimmer remains separate from gradients.
-SHIMMER_REGION_PROBABILITY = 0.58
+SHIMMER_REGION_PROBABILITY = 0.0
 
 # Strong Edge splice presence.
 SPLICE_REGION_PROBABILITY = 0.66
@@ -104,42 +104,12 @@ PRINT_GRAIN = 0.55
 # ============================================================
 
 PALETTE = {
-
-    "orange": [
-        "#753C0F",
-        "#AE5D1E",
-        "#FF5B00",
-        "#FF7E36",
-        "#FFB96E",
-        "#FFD4A7",
-    ],
-
-    "blue": [
-        "#173736",
-        "#2C615F",
-        "#449491",
-        "#6BB3B0",
-        "#98C2C0",
-        "#CFD4D3",
-    ],
-
-    "red": [
-        "#410F13",
-        "#740912",
-        "#FF0015",
-        "#FF4D5B",
-        "#FFBAB9",
-        "#FDDCDC",
-    ],
-
-    "purple": [
-        "#150833",
-        "#36265A",
-        "#A92CFF",
-        "#EBC2F5",
-        "#F9E3FF",
-        "#F9E3FF",
-    ],
+    "blue": ["#416CA4"],
+    "brown": ["#4B190F"],
+    "pink": ["#F9BFF9"],
+    "yellow": ["#FFFF8F"],
+    "red": ["#FF0015"],
+    "slate": ["#A6B5C2"],
 }
 
 
@@ -2668,13 +2638,7 @@ def add_overprint(
 
     color = palette_color(
         family,
-        random.choice(
-            [
-                1,
-                2,
-                3,
-            ]
-        ),
+        0,
     )
 
     overlay = Image.new(
