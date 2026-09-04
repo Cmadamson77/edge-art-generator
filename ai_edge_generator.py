@@ -1,192 +1,196 @@
+# ============================================================
+# AI EDGE GENERATOR V3.2
+# Standalone AI-only pattern generator
+# ============================================================
+#
+# CORE RULES
+#
+# - artwork constructed on a fixed 25 x 25 px grid
+# - requested canvas may be ANY whole-pixel dimensions
+# - complete 25 px cells bleed past the requested canvas
+# - final PNG / SVG viewport crops the overflow
+#
+# - exact flat spot colors only
+# - background ONLY #EAE7D9
+# - no gradients
+# - no shimmer
+# - no opacity variation
+# - no grain / texture
+#
+# - stable baseline footprint controlled by seed
+# - calibrated negative-space control
+# - adjustable color balance
+# - adjustable shape dominance
+# - two-color checkerboards
+# - lattice / diamonds
+# - stair steps
+# - pills / capsules
+# - AI architectural / factory motifs
+# - ladder / circuit motifs
+# - optional diagonal splice
+#
+# IMPORTANT
+#
+# This generator creates a CompositionBlueprint first.
+# PNG and Production Vector both render from that SAME
+# blueprint so they remain visually matched.
+#
+# ============================================================
+
+
+import hashlib
 import math
 import random
 
-import numpy as np
-from PIL import Image, ImageChops, ImageDraw
+from dataclasses import dataclass, asdict
+from typing import Dict, List, Optional
+
+from PIL import Image, ImageDraw
 
 
 # ============================================================
-# AI EDGE PATTERN GENERATOR v2
-# ============================================================
-#
-# COMPLETE STANDALONE SCRIPT
-#
-# AI Edge v2 keeps the successful v1 pattern language:
-#
-# - cream paper
-# - dense textile / quilt construction
-# - AI-specific factory / ladder / stepped motifs
-# - checker, circles, diamonds and capsule support motifs
-# - grid-locked geometry
-# - supersampled crisp rendering
-# - diagonal splice
-# - shimmer
-#
-# V2 CHANGE:
-#
-# TRUE gradients now live INSIDE shapes and clusters.
-#
-# A gradient region creates one continuous gradient field.
-# Every shape inside that region reveals a portion of that
-# same field.
-#
-# This creates:
-#
-# - gradients inside large blocks
-# - gradients across capsule groups
-# - gradients across repeated circles
-# - continuous color transitions through pattern clusters
-#
-# instead of:
-#
-# - one flat color per shape
-# - "shimmer pretending to be a gradient"
-#
-# Dependencies:
-#
-#     pip install pillow numpy
-#
-# Run:
-#
-#     python3 ai_edge_pattern_v2.py
-#
+# BRAND SYSTEM
 # ============================================================
 
+GRID = 25
 
-# ============================================================
-# 1. GLOBAL SETTINGS
-# ============================================================
+BACKGROUND = "#EAE7D9"
 
-SUPERSAMPLE = 4
-
-PAPER = "#EAE7D9"
-
-OUTPUT_WIDTH = 1200
-OUTPUT_HEIGHT = 1600
-
-# None = different artwork every run.
-# Set an integer to recreate the same artwork.
-SEED = None
-
-
-# ------------------------------------------------------------
-# COLOR / EFFECT FREQUENCY
-# ------------------------------------------------------------
-
-# Requested approximately 30–40%.
-TRUE_GRADIENT_REGION_PROBABILITY = 0.0
-
-# Shimmer remains separate from gradients.
-SHIMMER_REGION_PROBABILITY = 0.0
-
-# Strong Edge splice presence.
-SPLICE_REGION_PROBABILITY = 0.66
-
-
-# ------------------------------------------------------------
-# MOTIF WEIGHTING
-# ------------------------------------------------------------
-
-# Keeps AI-specific vocabulary dominant,
-# while retaining textile variety.
-AI_MOTIF_WEIGHT = 0.70
-
-
-# ------------------------------------------------------------
-# TEXTURE
-# ------------------------------------------------------------
-
-PRINT_GRAIN = 0.55
-
-
-# ============================================================
-# 2. AI EDGE COLOR SYSTEM
-# ============================================================
-
-PALETTE = {
-    "blue": ["#416CA4"],
-    "brown": ["#4B190F"],
-    "pink": ["#F9BFF9"],
-    "yellow": ["#FFFF8F"],
-    "red": ["#FF0015"],
-    "slate": ["#A6B5C2"],
+COLORS = {
+    "Brown": "#4B190F",
+    "Pink": "#F9BFF9",
+    "Red": "#FF0015",
+    "Yellow": "#FFFF8F",
+    "Blue": "#416CA4",
+    "Gray": "#A6B5C2",
+    "Ice Blue": "#CBFEFF",
 }
 
 
+DEFAULT_COLOR_WEIGHTS = {
+    "Brown": 14,
+    "Pink": 14,
+    "Red": 14,
+    "Yellow": 14,
+    "Blue": 16,
+    "Gray": 14,
+    "Ice Blue": 14,
+}
+
+
+DEFAULT_SHAPE_WEIGHTS = {
+    "Checkerboard": 5,
+    "Lattice": 5,
+    "Stair Step": 5,
+    "Pills": 5,
+}
+
+
+# These baseline motifs are deliberately not exposed as
+# controls. They preserve the AI Edge identity.
+
+BASE_FACTORY_WEIGHT = 3.0
+BASE_LADDER_WEIGHT = 2.5
+BASE_CIRCLES_WEIGHT = 1.5
+
+
 # ============================================================
-# 3. CURATED AI EDGE TRUE GRADIENTS
+# NEGATIVE SPACE CALIBRATION
 # ============================================================
 #
-# These are treated as LARGE events.
+# The motifs themselves naturally expose some background.
 #
-# A gradient should span an entire motif region,
-# not restart inside every shape.
+# Therefore:
+#
+# 0–15% = dense composition; no complete macro regions removed
+#
+# Above 15%, complete macro regions are progressively omitted.
 #
 # ============================================================
 
-AI_GRADIENTS = [
-
-    # cream-orange -> signal red
-    (
-        "#FFD4A7",
-        "#FF0015",
-    ),
-
-    # pale lavender -> burgundy
-    (
-        "#EBC2F5",
-        "#740912",
-    ),
-
-    # heritage brown -> electric purple
-    (
-        "#753C0F",
-        "#A92CFF",
-    ),
-
-    # pale blue -> electric blue
-    (
-        "#CFD4D3",
-        "#449491",
-    ),
-]
+NATURAL_NEGATIVE_SPACE_ALLOWANCE = 15.0
 
 
 # ============================================================
-# 4. RANDOM INITIALIZATION
+# DATA STRUCTURES
 # ============================================================
 
-if SEED is None:
+@dataclass
+class Region:
 
-    SEED = random.randint(
-        0,
-        999_999_999,
-    )
+    id: int
 
-random.seed(SEED)
-np.random.seed(SEED)
+    # Grid coordinates, not pixels.
+    x: int
+    y: int
+    w: int
+    h: int
+
+    negative_score: float
+    motif_seed: int
+    color_seed: int
+
+
+@dataclass
+class Primitive:
+
+    id: str
+
+    type: str
+
+    # Pixel coordinates.
+    #
+    # These are allowed to extend past blueprint.width /
+    # blueprint.height. The final render crops the overflow.
+
+    x: float
+    y: float
+    w: float
+    h: float
+
+    color: str
+
+    splice_color: Optional[str] = None
+
+    region_id: int = 0
+    motif: str = ""
+
+
+@dataclass
+class CompositionBlueprint:
+
+    # Requested output canvas.
+    width: int
+    height: int
+
+    grid: int
+    seed: int
+    background: str
+
+    # Full internal grid coverage.
+    grid_cols: int
+    grid_rows: int
+    bleed_width: int
+    bleed_height: int
+
+    negative_space: float
+    macro_omission: float
+
+    color_weights: Dict[str, float]
+    shape_weights: Dict[str, float]
+
+    splice_enabled: bool
+    splice_direction: str
+    splice_position: float
+
+    regions: List[Region]
+    omitted_region_ids: List[int]
+    primitives: List[Primitive]
 
 
 # ============================================================
-# 5. BASIC COLOR HELPERS
+# GENERAL HELPERS
 # ============================================================
-
-def hex_to_rgb(value):
-
-    value = value.lstrip("#")
-
-    return tuple(
-        int(
-            value[i:i + 2],
-            16,
-        )
-        for i in (
-            0,
-            2,
-            4,
-        )
-    )
-
 
 def clamp(
     value,
@@ -203,2155 +207,1833 @@ def clamp(
     )
 
 
-def mix_rgb(
-    color_a,
-    color_b,
-    t,
+def normalize_weights(
+    incoming,
+    defaults,
+    minimum=0.0,
 ):
 
-    t = clamp(
-        t,
-        0.0,
-        1.0,
-    )
+    incoming = incoming or {}
 
-    return tuple(
-        int(
-            color_a[i]
-            *
-            (
-                1.0 - t
-            )
-            +
-            color_b[i]
-            *
-            t
-        )
-        for i in range(3)
-    )
+    result = {}
 
+    for name, default in defaults.items():
 
-def adjust_rgb(
-    color,
-    amount,
-):
+        try:
 
-    result = []
-
-    for channel in color:
-
-        if amount >= 0:
-
-            value = (
-                channel
-                +
-                (
-                    255 - channel
+            value = float(
+                incoming.get(
+                    name,
+                    default,
                 )
-                *
-                amount
             )
+
+        except Exception:
+
+            value = float(
+                default
+            )
+
+        result[name] = max(
+            minimum,
+            value,
+        )
+
+    if sum(
+        result.values()
+    ) <= 0:
+
+        return {
+            name: float(value)
+            for name, value
+            in defaults.items()
+        }
+
+    return result
+
+
+def stable_integer(
+    *parts,
+):
+
+    key = "|".join(
+        str(part)
+        for part in parts
+    )
+
+    digest = hashlib.sha256(
+        key.encode(
+            "utf-8"
+        )
+    ).digest()
+
+    return int.from_bytes(
+        digest[:8],
+        byteorder="big",
+        signed=False,
+    )
+
+
+def stable_float(
+    *parts,
+):
+
+    integer = stable_integer(
+        *parts
+    )
+
+    return (
+        integer
+        /
+        float(
+            2 ** 64 - 1
+        )
+    )
+
+
+def make_rng(
+    *parts,
+):
+
+    return random.Random(
+        stable_integer(
+            *parts
+        )
+    )
+
+
+def weighted_choice(
+    rng,
+    weight_dict,
+):
+
+    names = list(
+        weight_dict.keys()
+    )
+
+    weights = [
+        max(
+            0.0,
+            float(
+                weight_dict[name]
+            ),
+        )
+        for name in names
+    ]
+
+    if sum(
+        weights
+    ) <= 0:
+
+        weights = [
+            1.0
+            for _ in names
+        ]
+
+    return rng.choices(
+        names,
+        weights=weights,
+        k=1,
+    )[0]
+
+
+def choose_secondary_color(
+    rng,
+    first_name,
+    color_weights,
+):
+
+    alternatives = {
+        name: weight
+        for name, weight
+        in color_weights.items()
+        if (
+            name != first_name
+            and
+            weight > 0
+        )
+    }
+
+    if not alternatives:
+
+        alternatives = {
+            name: 1
+            for name in COLORS
+            if name != first_name
+        }
+
+    return weighted_choice(
+        rng,
+        alternatives,
+    )
+
+
+# ============================================================
+# BASELINE FOOTPRINT
+# ============================================================
+#
+# Creates a tiled set of macro regions on the 25 px grid.
+#
+# For arbitrary requested dimensions, cols / rows are CEILED:
+#
+# 1213 px wide
+# -> ceil(1213 / 25)
+# -> 49 cells
+# -> 1225 px internal pattern width
+# -> final image crops to 1213 px
+#
+# ============================================================
+
+def build_baseline_regions(
+    cols,
+    rows,
+    seed,
+):
+
+    rng = make_rng(
+        seed,
+        "baseline",
+    )
+
+    raw_regions = []
+
+    MIN_REGION = 3
+    MAX_REGION = 10
+
+
+    def split_region(
+        x,
+        y,
+        w,
+        h,
+    ):
+
+        should_split = (
+            w > MAX_REGION
+            or
+            h > MAX_REGION
+            or
+            (
+                w * h > 48
+                and
+                rng.random() < 0.72
+            )
+        )
+
+
+        if not should_split:
+
+            raw_regions.append(
+                (
+                    x,
+                    y,
+                    w,
+                    h,
+                )
+            )
+
+            return
+
+
+        split_vertical = (
+            w >= h
+        )
+
+
+        if rng.random() < 0.22:
+
+            split_vertical = (
+                not split_vertical
+            )
+
+
+        if split_vertical:
+
+            possible = [
+                position
+                for position
+                in range(
+                    MIN_REGION,
+                    w - MIN_REGION + 1,
+                )
+            ]
+
+
+            if not possible:
+
+                raw_regions.append(
+                    (
+                        x,
+                        y,
+                        w,
+                        h,
+                    )
+                )
+
+                return
+
+
+            split = rng.choice(
+                possible
+            )
+
+
+            split_region(
+                x,
+                y,
+                split,
+                h,
+            )
+
+
+            split_region(
+                x + split,
+                y,
+                w - split,
+                h,
+            )
+
 
         else:
 
-            value = (
-                channel
-                *
-                (
-                    1 + amount
+            possible = [
+                position
+                for position
+                in range(
+                    MIN_REGION,
+                    h - MIN_REGION + 1,
                 )
+            ]
+
+
+            if not possible:
+
+                raw_regions.append(
+                    (
+                        x,
+                        y,
+                        w,
+                        h,
+                    )
+                )
+
+                return
+
+
+            split = rng.choice(
+                possible
             )
 
-        result.append(
-            int(
-                clamp(
-                    value,
-                    0,
-                    255,
-                )
+
+            split_region(
+                x,
+                y,
+                w,
+                split,
             )
-        )
-
-    return tuple(result)
 
 
-def rgba(
-    color,
-    alpha=255,
-):
-
-    return (
-        color[0],
-        color[1],
-        color[2],
-        alpha,
-    )
+            split_region(
+                x,
+                y + split,
+                w,
+                h - split,
+            )
 
 
-def family_rgb(
-    family,
-):
-
-    return [
-        hex_to_rgb(value)
-        for value in PALETTE[family]
-    ]
-
-
-def palette_color(
-    family,
-    index,
-):
-
-    colors = family_rgb(family)
-
-    index = int(
-        clamp(
-            index,
-            0,
-            len(colors) - 1,
-        )
-    )
-
-    return colors[index]
-
-
-# ============================================================
-# 6. CONTINUOUS PALETTE SAMPLING
-# ============================================================
-
-def sample_family(
-    family,
-    t,
-):
-
-    colors = family_rgb(family)
-
-    t = clamp(
-        t,
+    split_region(
         0,
-        1,
-    )
-
-    position = (
-        t
-        *
-        (
-            len(colors) - 1
-        )
-    )
-
-    left = int(
-        math.floor(position)
-    )
-
-    right = min(
-        len(colors) - 1,
-        left + 1,
-    )
-
-    local_t = (
-        position
-        -
-        left
-    )
-
-    return mix_rgb(
-        colors[left],
-        colors[right],
-        local_t,
+        0,
+        cols,
+        rows,
     )
 
 
-def sample_gradient(
-    pair,
-    t,
-):
-
-    return mix_rgb(
-        hex_to_rgb(
-            pair[0]
-        ),
-        hex_to_rgb(
-            pair[1]
-        ),
-        t,
-    )
+    regions = []
 
 
-# ============================================================
-# 7. LOCKED DUAL GRID
-# ============================================================
-
-def divisors(number):
-
-    values = []
-
-    for i in range(
-        1,
-        int(
-            math.sqrt(number)
-        ) + 1,
+    for index, (
+        x,
+        y,
+        w,
+        h,
+    ) in enumerate(
+        raw_regions
     ):
 
-        if number % i == 0:
-
-            values.append(i)
-
-            if i != number // i:
-
-                values.append(
-                    number // i
-                )
-
-    return sorted(values)
+        region_id = (
+            index + 1
+        )
 
 
-def choose_grid(
-    width,
-    height,
+        regions.append(
+            Region(
+                id=region_id,
+
+                x=x,
+                y=y,
+                w=w,
+                h=h,
+
+                negative_score=stable_float(
+                    seed,
+                    "negative",
+                    x,
+                    y,
+                    w,
+                    h,
+                ),
+
+                motif_seed=stable_integer(
+                    seed,
+                    "motif",
+                    x,
+                    y,
+                    w,
+                    h,
+                ),
+
+                color_seed=stable_integer(
+                    seed,
+                    "color",
+                    x,
+                    y,
+                    w,
+                    h,
+                ),
+            )
+        )
+
+
+    return regions
+
+
+# ============================================================
+# NEGATIVE SPACE
+# ============================================================
+
+def calculate_macro_omission(
+    negative_space,
 ):
 
-    common = math.gcd(
-        width,
-        height,
-    )
-
-    candidates = [
-        d
-        for d in divisors(common)
-        if 18 <= d <= 40
-    ]
-
-    if candidates:
-
-        preferred = random.choice(
-            [
-                20,
-                24,
-                25,
-                30,
-                32,
-            ]
-        )
-
-        small_unit = min(
-            candidates,
-            key=lambda d: abs(
-                d - preferred
-            ),
-        )
-
-    else:
-
-        small_unit = max(
-            12,
-            int(
-                min(
-                    width,
-                    height,
-                )
-                /
-                48
-            ),
-        )
-
-    subdivision = random.choice(
-        [
-            4,
-            5,
-            6,
-        ]
-    )
-
-    large_unit = (
-        small_unit
-        *
-        subdivision
-    )
-
-    return (
-        large_unit,
-        small_unit,
-        subdivision,
-    )
-
-
-# ============================================================
-# 8. SUPERSAMPLING
-# ============================================================
-
-def hi(value):
-
-    return int(
-        round(
-            value
-            *
-            SUPERSAMPLE
-        )
-    )
-
-
-def hi_bbox(bbox):
-
-    return tuple(
-        hi(v)
-        for v in bbox
-    )
-
-
-# ============================================================
-# 9. SHAPE MASKS
-# ============================================================
-
-def shape_mask_local(
-    width,
-    height,
-    shape,
-):
-
-    mask = Image.new(
-        "L",
-        (
-            width,
-            height,
+    requested = clamp(
+        float(
+            negative_space
         ),
-        0,
+        0.0,
+        60.0,
     )
 
-    draw = ImageDraw.Draw(
-        mask
+    return max(
+        0.0,
+        requested
+        -
+        NATURAL_NEGATIVE_SPACE_ALLOWANCE,
     )
 
-    w = width
-    h = height
 
-    if shape == "circle":
-
-        size = min(
-            w,
-            h,
-        )
-
-        cx = w / 2
-        cy = h / 2
-
-        draw.ellipse(
-            (
-                int(
-                    round(
-                        cx - size / 2
-                    )
-                ),
-                int(
-                    round(
-                        cy - size / 2
-                    )
-                ),
-                int(
-                    round(
-                        cx + size / 2
-                    )
-                ),
-                int(
-                    round(
-                        cy + size / 2
-                    )
-                ),
-            ),
-            fill=255,
-        )
-
-    elif shape == "capsule":
-
-        radius = int(
-            min(
-                w,
-                h,
-            )
-            /
-            2
-        )
-
-        draw.rounded_rectangle(
-            (
-                0,
-                0,
-                w,
-                h,
-            ),
-            radius=radius,
-            fill=255,
-        )
-
-    elif shape == "diamond":
-
-        cx = int(
-            round(
-                w / 2
-            )
-        )
-
-        cy = int(
-            round(
-                h / 2
-            )
-        )
-
-        draw.polygon(
-            [
-                (
-                    cx,
-                    0,
-                ),
-                (
-                    w,
-                    cy,
-                ),
-                (
-                    cx,
-                    h,
-                ),
-                (
-                    0,
-                    cy,
-                ),
-            ],
-            fill=255,
-        )
-
-    elif shape == "triangle_up":
-
-        draw.polygon(
-            [
-                (
-                    int(
-                        w / 2
-                    ),
-                    0,
-                ),
-                (
-                    w,
-                    h,
-                ),
-                (
-                    0,
-                    h,
-                ),
-            ],
-            fill=255,
-        )
-
-    elif shape == "triangle_down":
-
-        draw.polygon(
-            [
-                (
-                    0,
-                    0,
-                ),
-                (
-                    w,
-                    0,
-                ),
-                (
-                    int(
-                        w / 2
-                    ),
-                    h,
-                ),
-            ],
-            fill=255,
-        )
-
-    else:
-
-        draw.rectangle(
-            (
-                0,
-                0,
-                w,
-                h,
-            ),
-            fill=255,
-        )
-
-    return mask
-
-
-# ============================================================
-# 10. GRID-ALIGNED 45° SPLICE MASK
-# ============================================================
-
-def create_splice_mask(
-    width,
-    height,
-    small_unit,
-    direction,
-    position,
-):
-
-    mask = Image.new(
-        "L",
-        (
-            hi(width),
-            hi(height),
-        ),
-        0,
-    )
-
-    draw = ImageDraw.Draw(
-        mask
-    )
-
-    span = (
-        width
-        +
-        height
-    )
-
-    if direction == "down":
-
-        raw_b = (
-            position
-            *
-            span
-            -
-            width
-        )
-
-        b = (
-            round(
-                raw_b
-                /
-                small_unit
-            )
-            *
-            small_unit
-        )
-
-        polygon = [
-
-            (
-                hi(0),
-                hi(b),
-            ),
-
-            (
-                hi(width),
-                hi(
-                    width + b
-                ),
-            ),
-
-            (
-                hi(width),
-                hi(
-                    height
-                    +
-                    width
-                    +
-                    small_unit
-                ),
-            ),
-
-            (
-                hi(0),
-                hi(
-                    height
-                    +
-                    small_unit
-                ),
-            ),
-        ]
-
-    else:
-
-        raw_b = (
-            position
-            *
-            span
-        )
-
-        b = (
-            round(
-                raw_b
-                /
-                small_unit
-            )
-            *
-            small_unit
-        )
-
-        polygon = [
-
-            (
-                hi(0),
-                hi(
-                    -height
-                    -
-                    small_unit
-                ),
-            ),
-
-            (
-                hi(width),
-                hi(
-                    -height
-                    -
-                    small_unit
-                ),
-            ),
-
-            (
-                hi(width),
-                hi(
-                    b - width
-                ),
-            ),
-
-            (
-                hi(0),
-                hi(b),
-            ),
-        ]
-
-    draw.polygon(
-        polygon,
-        fill=255,
-    )
-
-    return mask
-
-
-# ============================================================
-# 11. SHIMMER ENGINE
-# ============================================================
-
-def directional_t(
-    row,
-    col,
-    rows,
+def choose_omitted_regions(
+    regions,
     cols,
-    axis,
+    rows,
+    negative_space,
 ):
 
-    if axis == "x":
+    macro_omission = (
+        calculate_macro_omission(
+            negative_space
+        )
+    )
+
+
+    if macro_omission <= 0:
 
         return (
-            col
-            /
-            max(
-                1,
-                cols - 1,
-            )
+            set(),
+            0.0,
         )
 
-    if axis == "y":
 
-        return (
-            row
-            /
-            max(
-                1,
-                rows - 1,
-            )
-        )
-
-    if axis == "diag_down":
-
-        return (
-            row + col
-        ) / max(
-            1,
-            rows
-            +
-            cols
-            -
-            2,
-        )
-
-    return (
-        row
-        +
-        (
-            cols - 1 - col
-        )
-    ) / max(
-        1,
-        rows
-        +
+    total_cells = (
         cols
-        -
-        2,
-    )
-
-
-def shimmer_adjustment(
-    t,
-    phase,
-):
-
-    wave = math.sin(
-        (
-            t
-            *
-            math.pi
-            *
-            3.0
-        )
-        +
-        phase
-    )
-
-    wave += (
-        0.35
         *
-        math.sin(
+        rows
+    )
+
+
+    target_cells = (
+        total_cells
+        *
+        (
+            macro_omission
+            /
+            100.0
+        )
+    )
+
+
+    ordered = sorted(
+        regions,
+        key=lambda region:
+            region.negative_score,
+    )
+
+
+    omitted = set()
+
+    omitted_cells = 0
+
+
+    for region in ordered:
+
+        area = (
+            region.w
+            *
+            region.h
+        )
+
+
+        without_region_error = abs(
+            target_cells
+            -
+            omitted_cells
+        )
+
+
+        with_region_error = abs(
+            target_cells
+            -
             (
-                t
-                *
-                math.pi
-                *
-                6.0
-            )
-            -
-            phase
-            *
-            0.7
-        )
-    )
-
-    return (
-        wave
-        *
-        0.075
-    )
-
-
-def region_spot_color(
-    row,
-    col,
-    rows,
-    cols,
-    settings,
-):
-
-    t = directional_t(
-        row,
-        col,
-        rows,
-        cols,
-        settings["gradient_axis"],
-    )
-
-    base = sample_family(
-        settings["family"],
-        t,
-    )
-
-    if settings["shimmer"]:
-
-        base = adjust_rgb(
-            base,
-            shimmer_adjustment(
-                t,
-                settings["shimmer_phase"],
-            ),
-        )
-
-    return base
-
-
-# ============================================================
-# 12. TRUE CONTINUOUS GRADIENT ENGINE
-# ============================================================
-
-def make_true_gradient_patch(
-    bbox,
-    region,
-    settings,
-):
-
-    x0, y0, x1, y1 = bbox
-
-    w = max(
-        1,
-        hi(
-            x1 - x0
-        ),
-    )
-
-    h = max(
-        1,
-        hi(
-            y1 - y0
-        ),
-    )
-
-    pair = settings[
-        "gradient_pair"
-    ]
-
-    start = np.array(
-        hex_to_rgb(
-            pair[0]
-        ),
-        dtype=np.float32,
-    )
-
-    end = np.array(
-        hex_to_rgb(
-            pair[1]
-        ),
-        dtype=np.float32,
-    )
-
-    xs = (
-        x0
-        +
-        np.arange(w)
-        /
-        SUPERSAMPLE
-    )
-
-    ys = (
-        y0
-        +
-        np.arange(h)
-        /
-        SUPERSAMPLE
-    )
-
-    xx, yy = np.meshgrid(
-        xs,
-        ys,
-    )
-
-    rx0, ry0, rx1, ry1 = region
-
-    rw = max(
-        1.0,
-        rx1 - rx0,
-    )
-
-    rh = max(
-        1.0,
-        ry1 - ry0,
-    )
-
-    nx = np.clip(
-        (
-            xx - rx0
-        )
-        /
-        rw,
-        0.0,
-        1.0,
-    )
-
-    ny = np.clip(
-        (
-            yy - ry0
-        )
-        /
-        rh,
-        0.0,
-        1.0,
-    )
-
-    axis = settings[
-        "gradient_axis"
-    ]
-
-    if axis == "x":
-
-        t = nx
-
-    elif axis == "y":
-
-        t = ny
-
-    elif axis == "diag_down":
-
-        t = (
-            nx + ny
-        ) / 2.0
-
-    else:
-
-        t = (
-            nx
-            +
-            (
-                1.0 - ny
-            )
-        ) / 2.0
-
-    # Soft eased transition.
-    #
-    # This makes the gradients feel more printed and less
-    # like a generic software preset.
-
-    t = (
-        t
-        *
-        t
-        *
-        (
-            3.0
-            -
-            2.0
-            *
-            t
-        )
-    )
-
-    arr = (
-        start[
-            None,
-            None,
-            :
-        ]
-        *
-        (
-            1.0
-            -
-            t[
-                :,
-                :,
-                None
-            ]
-        )
-        +
-        end[
-            None,
-            None,
-            :
-        ]
-        *
-        t[
-            :,
-            :,
-            None
-        ]
-    )
-
-    # --------------------------------------------------------
-    # SUBTLE SHIMMER ON TRUE GRADIENTS
-    # --------------------------------------------------------
-    #
-    # Still separate — just gently modulates the printed field.
-    #
-    # --------------------------------------------------------
-
-    if settings["shimmer"]:
-
-        phase = settings[
-            "shimmer_phase"
-        ]
-
-        shimmer = (
-            np.sin(
-                (
-                    t
-                    *
-                    math.pi
-                    *
-                    2.25
-                )
+                omitted_cells
                 +
-                phase
+                area
             )
-            *
-            7.0
         )
 
-        shimmer += (
-            np.sin(
-                (
-                    t
-                    *
-                    math.pi
-                    *
-                    4.5
+
+        if omitted_cells < target_cells:
+
+            if (
+                with_region_error
+                <=
+                without_region_error
+                or
+                omitted_cells
+                <
+                target_cells * 0.72
+            ):
+
+                omitted.add(
+                    region.id
                 )
-                -
-                phase
-                *
-                0.6
-            )
-            *
-            2.5
-        )
 
-        arr += shimmer[
-            :,
-            :,
-            None
-        ]
+                omitted_cells += (
+                    area
+                )
 
-    arr = np.clip(
-        arr,
-        0,
-        255,
-    ).astype(
-        np.uint8
-    )
 
-    alpha = np.full(
-        (
-            h,
-            w,
-            1,
-        ),
-        238,
-        dtype=np.uint8,
-    )
-
-    rgba_arr = np.concatenate(
-        [
-            arr,
-            alpha,
-        ],
-        axis=2,
-    )
-
-    return Image.fromarray(
-        rgba_arr,
-        "RGBA",
-    )
-
-
-# ============================================================
-# 13. DRAW SHAPE
-# ============================================================
-
-def draw_shape(
-    canvas,
-    bbox,
-    shape,
-    color_a,
-    color_b=None,
-    splice_mask=None,
-    alpha=236,
-    gradient_patch=None,
-):
-
-    x0, y0, x1, y1 = hi_bbox(
-        bbox
-    )
-
-    cx0 = max(
-        0,
-        x0,
-    )
-
-    cy0 = max(
-        0,
-        y0,
-    )
-
-    cx1 = min(
-        canvas.size[0],
-        x1,
-    )
-
-    cy1 = min(
-        canvas.size[1],
-        y1,
-    )
-
-    if (
-        cx1 <= cx0
-        or
-        cy1 <= cy0
-    ):
-
-        return
-
-    full_w = max(
-        1,
-        x1 - x0,
-    )
-
-    full_h = max(
-        1,
-        y1 - y0,
-    )
-
-    mask = shape_mask_local(
-        full_w,
-        full_h,
-        shape,
-    )
-
-    crop_box = (
-        cx0 - x0,
-        cy0 - y0,
-        cx1 - x0,
-        cy1 - y0,
-    )
-
-    mask = mask.crop(
-        crop_box
-    )
-
-    patch_size = (
-        cx1 - cx0,
-        cy1 - cy0,
-    )
-
-    if gradient_patch is not None:
-
-        primary_layer = gradient_patch.crop(
-            crop_box
-        )
-
-    else:
-
-        primary_layer = Image.new(
-            "RGBA",
-            patch_size,
-            rgba(
-                color_a,
-                alpha,
-            ),
-        )
-
-    # --------------------------------------------------------
-    # NO SPLICE
-    # --------------------------------------------------------
-
-    if (
-        splice_mask is None
-        or
-        color_b is None
-    ):
-
-        canvas.paste(
-            primary_layer,
-            (
-                cx0,
-                cy0,
-            ),
-            mask,
-        )
-
-        return
-
-    # --------------------------------------------------------
-    # SPLICE
-    # --------------------------------------------------------
-
-    splice_crop = splice_mask.crop(
-        (
-            cx0,
-            cy0,
-            cx1,
-            cy1,
-        )
-    )
-
-    side_a = ImageChops.multiply(
-        mask,
-        splice_crop,
-    )
-
-    side_b = ImageChops.multiply(
-        mask,
-        ImageChops.invert(
-            splice_crop
-        ),
-    )
-
-    canvas.paste(
-        primary_layer,
-        (
-            cx0,
-            cy0,
-        ),
-        side_a,
-    )
-
-    splice_layer = Image.new(
-        "RGBA",
-        patch_size,
-        rgba(
-            color_b,
-            alpha,
-        ),
-    )
-
-    canvas.paste(
-        splice_layer,
-        (
-            cx0,
-            cy0,
-        ),
-        side_b,
-    )
-
-
-# ============================================================
-# 14. GRID HELPERS
-# ============================================================
-
-def region_grid(
-    region,
-    small_unit,
-):
-
-    x0, y0, x1, y1 = region
-
-    cols = max(
-        1,
-        int(
-            (
-                x1 - x0
-            )
-            //
-            small_unit
-        ),
-    )
-
-    rows = max(
-        1,
-        int(
-            (
-                y1 - y0
-            )
-            //
-            small_unit
-        ),
-    )
-
-    return (
-        cols,
-        rows,
-    )
-
-
-def cell_box(
-    region,
-    row,
-    col,
-    small_unit,
-    span_c=1,
-    span_r=1,
-):
-
-    x0, y0, _, _ = region
-
-    return (
-
-        x0
-        +
-        col
-        *
-        small_unit,
-
-        y0
-        +
-        row
-        *
-        small_unit,
-
-        x0
-        +
-        (
-            col + span_c
-        )
-        *
-        small_unit,
-
-        y0
-        +
-        (
-            row + span_r
-        )
-        *
-        small_unit,
-    )
-
-
-# ============================================================
-# 15. SPLICE COLOR
-# ============================================================
-
-def choose_splice_color(
-    base_family,
-):
-
-    options = [
-        family
-        for family in PALETTE
-        if family != base_family
-    ]
-
-    splice_family = random.choice(
-        options
-    )
-
-    splice_index = random.choice(
-        [
-            0,
-            1,
-            1,
-            2,
-        ]
-    )
-
-    return palette_color(
-        splice_family,
-        splice_index,
-    )
-
-
-# ============================================================
-# 16. SINGLE SHAPE RENDERER
-# ============================================================
-
-def render_shape(
-    canvas,
-    bbox,
-    shape,
-    row,
-    col,
-    rows,
-    cols,
-    settings,
-    splice_mask,
-    region,
-):
-
-    if settings["gradient"]:
-
-        gradient_patch = make_true_gradient_patch(
-            bbox,
-            region,
-            settings,
-        )
-
-        color_a = sample_gradient(
-            settings[
-                "gradient_pair"
-            ],
-            0.5,
-        )
-
-    else:
-
-        gradient_patch = None
-
-        color_a = region_spot_color(
-            row,
-            col,
-            rows,
-            cols,
-            settings,
-        )
-
-    splice_color = None
-    active_mask = None
-
-    if settings["splice"]:
-
-        splice_color = settings[
-            "splice_color"
-        ]
-
-        active_mask = splice_mask
-
-    draw_shape(
-        canvas,
-        bbox,
-        shape,
-        color_a,
-        splice_color,
-        active_mask,
-        random.randint(
-            224,
-            244,
-        ),
-        gradient_patch=gradient_patch,
-    )
-
-
-# ============================================================
-# 17. AI MOTIF — FACTORY / SAWTOOTH
-# ============================================================
-
-def motif_factory(
-    canvas,
-    region,
-    small_unit,
-    settings,
-    splice_mask,
-):
-
-    cols, rows = region_grid(
-        region,
-        small_unit,
-    )
-
-    if rows < 3:
-
-        return
-
-    roof_row = random.randint(
-        0,
-        max(
-            0,
-            rows // 3,
-        ),
-    )
-
-    for col in range(
-        0,
-        cols,
-        2,
-    ):
-
-        if col + 1 >= cols:
+        if omitted_cells >= target_cells:
 
             break
 
-        render_shape(
-            canvas,
-            cell_box(
-                region,
-                roof_row,
-                col,
-                small_unit,
-            ),
-            "triangle_up",
-            roof_row,
-            col,
-            rows,
-            cols,
-            settings,
-            splice_mask,
-            region,
-        )
 
-        render_shape(
-            canvas,
-            cell_box(
-                region,
-                roof_row,
-                col + 1,
-                small_unit,
-            ),
-            "rect",
-            roof_row,
-            col + 1,
-            rows,
-            cols,
-            settings,
-            splice_mask,
-            region,
-        )
-
-    for row in range(
-        roof_row + 1,
-        rows,
-    ):
-
-        for col in range(cols):
-
-            render_shape(
-                canvas,
-                cell_box(
-                    region,
-                    row,
-                    col,
-                    small_unit,
-                ),
-                "rect",
-                row,
-                col,
-                rows,
-                cols,
-                settings,
-                splice_mask,
-                region,
-            )
-
-
-# ============================================================
-# 18. AI MOTIF — LADDER
-# ============================================================
-
-def motif_ladder(
-    canvas,
-    region,
-    small_unit,
-    settings,
-    splice_mask,
-):
-
-    cols, rows = region_grid(
-        region,
-        small_unit,
+    actual_omission = (
+        omitted_cells
+        /
+        total_cells
+        *
+        100.0
     )
 
-    if cols < 3:
 
-        return
+    return (
+        omitted,
+        actual_omission,
+    )
 
-    spine = cols // 2
 
-    for row in range(rows):
+# ============================================================
+# MOTIF CHOICE
+# ============================================================
 
-        render_shape(
-            canvas,
-            cell_box(
-                region,
-                row,
-                spine,
-                small_unit,
-            ),
-            "rect",
-            row,
-            spine,
-            rows,
-            cols,
-            settings,
-            splice_mask,
-            region,
+def choose_region_motif(
+    region,
+    shape_weights,
+):
+
+    rng = random.Random(
+        region.motif_seed
+    )
+
+
+    checker = shape_weights[
+        "Checkerboard"
+    ]
+
+    lattice = shape_weights[
+        "Lattice"
+    ]
+
+    stairs = shape_weights[
+        "Stair Step"
+    ]
+
+    pills = shape_weights[
+        "Pills"
+    ]
+
+
+    weights = {
+
+        "checker":
+            checker
+            *
+            1.4,
+
+        "lattice":
+            lattice
+            *
+            1.15,
+
+        "stair":
+            stairs
+            *
+            1.15,
+
+        "pills":
+            pills
+            *
+            1.05,
+
+        "factory":
+            BASE_FACTORY_WEIGHT,
+
+        "ladder":
+            BASE_LADDER_WEIGHT,
+
+        "circles":
+            BASE_CIRCLES_WEIGHT,
+    }
+
+
+    return weighted_choice(
+        rng,
+        weights,
+    )
+
+
+# ============================================================
+# REGION COLORS
+# ============================================================
+
+def choose_region_colors(
+    region,
+    color_weights,
+):
+
+    rng = random.Random(
+        region.color_seed
+    )
+
+
+    primary_name = weighted_choice(
+        rng,
+        color_weights,
+    )
+
+
+    secondary_name = (
+        choose_secondary_color(
+            rng,
+            primary_name,
+            color_weights,
         )
+    )
 
-    for row in range(
-        0,
-        rows,
-        2,
+
+    splice_name = (
+        choose_secondary_color(
+            rng,
+            primary_name,
+            color_weights,
+        )
+    )
+
+
+    return (
+        COLORS[
+            primary_name
+        ],
+
+        COLORS[
+            secondary_name
+        ],
+
+        COLORS[
+            splice_name
+        ],
+    )
+
+
+# ============================================================
+# PRIMITIVE CREATOR
+# ============================================================
+
+class PrimitiveBuilder:
+
+    def __init__(
+        self,
+        region,
+        motif,
+        splice_color,
     ):
 
-        arm = random.choice(
-            [
-                1,
-                2,
-                2,
-                3,
-            ]
+        self.region = region
+        self.motif = motif
+        self.splice_color = splice_color
+
+        self.index = 0
+        self.items = []
+
+
+    def add(
+        self,
+        primitive_type,
+        x_cells,
+        y_cells,
+        w_cells,
+        h_cells,
+        color,
+    ):
+
+        self.index += 1
+
+
+        self.items.append(
+            Primitive(
+                id=(
+                    f"{self.motif}_"
+                    f"{self.region.id:03d}_"
+                    f"{self.index:04d}"
+                ),
+
+                type=primitive_type,
+
+                x=(
+                    x_cells
+                    *
+                    GRID
+                ),
+
+                y=(
+                    y_cells
+                    *
+                    GRID
+                ),
+
+                w=(
+                    w_cells
+                    *
+                    GRID
+                ),
+
+                h=(
+                    h_cells
+                    *
+                    GRID
+                ),
+
+                color=color,
+
+                splice_color=(
+                    self.splice_color
+                ),
+
+                region_id=(
+                    self.region.id
+                ),
+
+                motif=(
+                    self.motif
+                ),
+            )
         )
 
-        left = max(
-            0,
-            spine - arm,
-        )
 
-        right = min(
-            cols,
-            spine + arm + 1,
-        )
+# ============================================================
+# MOTIF: CHECKERBOARD
+# ============================================================
+
+def build_checker(
+    region,
+    color_a,
+    color_b,
+    splice_color,
+):
+
+    builder = PrimitiveBuilder(
+        region,
+        "checker",
+        splice_color,
+    )
+
+
+    for row in range(
+        region.h
+    ):
 
         for col in range(
-            left,
-            right,
+            region.w
         ):
 
-            if col == spine:
-
-                continue
-
-            render_shape(
-                canvas,
-                cell_box(
-                    region,
-                    row,
-                    col,
-                    small_unit,
-                ),
-                "rect",
-                row,
-                col,
-                rows,
-                cols,
-                settings,
-                splice_mask,
-                region,
-            )
-
-
-# ============================================================
-# 19. AI MOTIF — STAGGERED BLOCKS
-# ============================================================
-
-def motif_staggered_blocks(
-    canvas,
-    region,
-    small_unit,
-    settings,
-    splice_mask,
-):
-
-    cols, rows = region_grid(
-        region,
-        small_unit,
-    )
-
-    row = 0
-
-    while row < rows:
-
-        offset = (
-            row % 4
-        ) // 2
-
-        col = offset
-
-        while col < cols:
-
-            span_c = random.choice(
-                [
-                    2,
-                    3,
-                    3,
-                    4,
-                ]
-            )
-
-            span_r = random.choice(
-                [
-                    1,
-                    1,
-                    2,
-                ]
-            )
-
-            span_c = min(
-                span_c,
-                cols - col,
-            )
-
-            span_r = min(
-                span_r,
-                rows - row,
-            )
-
-            render_shape(
-                canvas,
-                cell_box(
-                    region,
-                    row,
-                    col,
-                    small_unit,
-                    span_c=span_c,
-                    span_r=span_r,
-                ),
-                "rect",
-                row,
-                col,
-                rows,
-                cols,
-                settings,
-                splice_mask,
-                region,
-            )
-
-            col += (
-                span_c
-                +
-                random.choice(
-                    [
-                        0,
-                        1,
-                    ]
+            color = (
+                color_a
+                if (
+                    (
+                        row
+                        +
+                        col
+                    )
+                    %
+                    2
+                    ==
+                    0
                 )
+                else
+                color_b
             )
 
-        row += random.choice(
-            [
+
+            builder.add(
+                "rect",
+
+                region.x
+                +
+                col,
+
+                region.y
+                +
+                row,
+
                 1,
-                2,
-            ]
-        )
+                1,
 
-
-# ============================================================
-# 20. SUPPORT MOTIF — CIRCLES
-# ============================================================
-
-def motif_circles(
-    canvas,
-    region,
-    small_unit,
-    settings,
-    splice_mask,
-):
-
-    cols, rows = region_grid(
-        region,
-        small_unit,
-    )
-
-    for row in range(rows):
-
-        for col in range(cols):
-
-            render_shape(
-                canvas,
-                cell_box(
-                    region,
-                    row,
-                    col,
-                    small_unit,
-                ),
-                "circle",
-                row,
-                col,
-                rows,
-                cols,
-                settings,
-                splice_mask,
-                region,
+                color,
             )
 
 
+    return builder.items
+
+
 # ============================================================
-# 21. SUPPORT MOTIF — DIAMONDS
+# MOTIF: LATTICE
 # ============================================================
 
-def motif_diamonds(
-    canvas,
+def build_lattice(
     region,
-    small_unit,
-    settings,
-    splice_mask,
+    color_a,
+    color_b,
+    splice_color,
 ):
 
-    cols, rows = region_grid(
+    builder = PrimitiveBuilder(
         region,
-        small_unit,
+        "lattice",
+        splice_color,
     )
 
-    for row in range(rows):
 
-        for col in range(cols):
+    for row in range(
+        region.h
+    ):
 
-            render_shape(
-                canvas,
-                cell_box(
-                    region,
-                    row,
-                    col,
-                    small_unit,
-                ),
+        for col in range(
+            region.w
+        ):
+
+            color = (
+                color_a
+                if (
+                    (
+                        (
+                            row
+                            //
+                            2
+                        )
+                        +
+                        (
+                            col
+                            //
+                            2
+                        )
+                    )
+                    %
+                    2
+                    ==
+                    0
+                )
+                else
+                color_b
+            )
+
+
+            builder.add(
                 "diamond",
-                row,
+
+                region.x
+                +
                 col,
-                rows,
-                cols,
-                settings,
-                splice_mask,
-                region,
+
+                region.y
+                +
+                row,
+
+                1,
+                1,
+
+                color,
             )
 
 
+    return builder.items
+
+
 # ============================================================
-# 22. SUPPORT MOTIF — CAPSULE WEAVE
+# MOTIF: CIRCLES
 # ============================================================
 
-def motif_capsules(
-    canvas,
+def build_circles(
     region,
-    small_unit,
-    settings,
-    splice_mask,
+    color_a,
+    color_b,
+    splice_color,
 ):
 
-    cols, rows = region_grid(
+    builder = PrimitiveBuilder(
         region,
-        small_unit,
+        "circles",
+        splice_color,
     )
+
+
+    for row in range(
+        region.h
+    ):
+
+        for col in range(
+            region.w
+        ):
+
+            color = (
+                color_a
+                if (
+                    (
+                        row
+                        +
+                        col
+                    )
+                    %
+                    3
+                    !=
+                    0
+                )
+                else
+                color_b
+            )
+
+
+            builder.add(
+                "circle",
+
+                region.x
+                +
+                col,
+
+                region.y
+                +
+                row,
+
+                1,
+                1,
+
+                color,
+            )
+
+
+    return builder.items
+
+
+# ============================================================
+# MOTIF: PILLS / CAPSULES
+# ============================================================
+
+def build_pills(
+    region,
+    color_a,
+    color_b,
+    splice_color,
+    seed,
+):
+
+    builder = PrimitiveBuilder(
+        region,
+        "pills",
+        splice_color,
+    )
+
+
+    rng = make_rng(
+        seed,
+        "pills",
+        region.id,
+    )
+
 
     horizontal = (
-        random.random()
-        <
-        0.5
+        region.w
+        >=
+        region.h
     )
+
+
+    if rng.random() < 0.25:
+
+        horizontal = (
+            not horizontal
+        )
+
 
     if horizontal:
 
-        for row in range(rows):
+        row = 0
+
+
+        while row < region.h:
 
             col = 0
 
-            while col < cols:
 
-                span = min(
-                    random.choice(
+            while col < region.w:
+
+                remaining = (
+                    region.w
+                    -
+                    col
+                )
+
+
+                length = min(
+                    remaining,
+
+                    rng.choice(
                         [
                             2,
                             2,
                             3,
+                            3,
                             4,
                         ]
                     ),
-                    cols - col,
                 )
 
-                render_shape(
-                    canvas,
-                    cell_box(
-                        region,
-                        row,
-                        col,
-                        small_unit,
-                        span_c=span,
-                    ),
-                    "capsule",
-                    row,
-                    col,
-                    rows,
-                    cols,
-                    settings,
-                    splice_mask,
-                    region,
+
+                color = (
+                    color_a
+                    if rng.random() < 0.68
+                    else color_b
                 )
+
+
+                builder.add(
+                    "capsule",
+
+                    region.x
+                    +
+                    col,
+
+                    region.y
+                    +
+                    row,
+
+                    length,
+                    1,
+
+                    color,
+                )
+
 
                 col += (
-                    span
-                    +
-                    random.choice(
-                        [
-                            0,
-                            0,
-                            1,
-                        ]
-                    )
+                    length
                 )
+
+
+            row += 1
+
 
     else:
 
-        for col in range(cols):
+        col = 0
+
+
+        while col < region.w:
 
             row = 0
 
-            while row < rows:
 
-                span = min(
-                    random.choice(
+            while row < region.h:
+
+                remaining = (
+                    region.h
+                    -
+                    row
+                )
+
+
+                length = min(
+                    remaining,
+
+                    rng.choice(
                         [
                             2,
                             2,
                             3,
+                            3,
                             4,
                         ]
                     ),
-                    rows - row,
                 )
 
-                render_shape(
-                    canvas,
-                    cell_box(
-                        region,
-                        row,
-                        col,
-                        small_unit,
-                        span_r=span,
-                    ),
-                    "capsule",
-                    row,
-                    col,
-                    rows,
-                    cols,
-                    settings,
-                    splice_mask,
-                    region,
+
+                color = (
+                    color_a
+                    if rng.random() < 0.68
+                    else color_b
                 )
+
+
+                builder.add(
+                    "capsule",
+
+                    region.x
+                    +
+                    col,
+
+                    region.y
+                    +
+                    row,
+
+                    1,
+                    length,
+
+                    color,
+                )
+
 
                 row += (
-                    span
-                    +
-                    random.choice(
-                        [
-                            0,
-                            0,
-                            1,
-                        ]
-                    )
+                    length
                 )
 
 
+            col += 1
+
+
+    return builder.items
+
+
 # ============================================================
-# 23. SUPPORT MOTIF — CHECKER
+# MOTIF: STAIR STEP
 # ============================================================
 
-def motif_checker(
-    canvas,
+def build_stair(
     region,
-    small_unit,
-    settings,
-    splice_mask,
+    color_a,
+    color_b,
+    splice_color,
+    seed,
 ):
 
-    cols, rows = region_grid(
+    builder = PrimitiveBuilder(
         region,
-        small_unit,
+        "stair",
+        splice_color,
     )
 
-    for row in range(rows):
 
-        for col in range(cols):
-
-            if (
-                row + col
-            ) % 2 == 0:
-
-                render_shape(
-                    canvas,
-                    cell_box(
-                        region,
-                        row,
-                        col,
-                        small_unit,
-                    ),
-                    "rect",
-                    row,
-                    col,
-                    rows,
-                    cols,
-                    settings,
-                    splice_mask,
-                    region,
-                )
-
-
-# ============================================================
-# 24. SUPPORT MOTIF — WOVEN BARS
-# ============================================================
-
-def motif_woven(
-    canvas,
-    region,
-    small_unit,
-    settings,
-    splice_mask,
-):
-
-    cols, rows = region_grid(
-        region,
-        small_unit,
+    rng = make_rng(
+        seed,
+        "stair",
+        region.id,
     )
 
-    for row in range(rows):
 
-        if row % 2 == 0:
+    direction = rng.choice(
+        [
+            "down_right",
+            "down_left",
+        ]
+    )
 
-            col = 0
 
-            while col < cols:
+    thickness = rng.choice(
+        [
+            1,
+            1,
+            2,
+        ]
+    )
 
-                span = min(
-                    2,
-                    cols - col,
-                )
 
-                render_shape(
-                    canvas,
-                    cell_box(
-                        region,
-                        row,
-                        col,
-                        small_unit,
-                        span_c=span,
-                    ),
-                    "rect",
-                    row,
-                    col,
-                    rows,
-                    cols,
-                    settings,
-                    splice_mask,
-                    region,
-                )
+    for row in range(
+        region.h
+    ):
 
-                col += 3
+        step = (
+            row
+            //
+            thickness
+        )
+
+
+        if direction == "down_right":
+
+            start = min(
+                region.w
+                -
+                1,
+
+                step,
+            )
+
 
         else:
 
-            for col in range(
-                1,
-                cols,
-                3,
-            ):
+            start = max(
+                0,
 
-                render_shape(
-                    canvas,
-                    cell_box(
-                        region,
-                        row,
-                        col,
-                        small_unit,
-                    ),
-                    "rect",
-                    row,
-                    col,
-                    rows,
-                    cols,
-                    settings,
-                    splice_mask,
-                    region,
+                region.w
+                -
+                1
+                -
+                step,
+            )
+
+
+        if direction == "down_right":
+
+            run = (
+                region.w
+                -
+                start
+            )
+
+
+            if run > 0:
+
+                color = (
+                    color_a
+                    if row % 3 != 2
+                    else color_b
                 )
 
 
+                builder.add(
+                    "rect",
+
+                    region.x
+                    +
+                    start,
+
+                    region.y
+                    +
+                    row,
+
+                    run,
+                    1,
+
+                    color,
+                )
+
+
+        else:
+
+            run = (
+                start
+                +
+                1
+            )
+
+
+            if run > 0:
+
+                color = (
+                    color_a
+                    if row % 3 != 2
+                    else color_b
+                )
+
+
+                builder.add(
+                    "rect",
+
+                    region.x,
+
+                    region.y
+                    +
+                    row,
+
+                    run,
+                    1,
+
+                    color,
+                )
+
+
+    return builder.items
+
+
 # ============================================================
-# 25. MOTIF TABLE
+# MOTIF: FACTORY / ARCHITECTURAL
 # ============================================================
 
-AI_MOTIFS = [
+def build_factory(
+    region,
+    color_a,
+    color_b,
+    splice_color,
+    seed,
+):
 
-    "factory",
-    "factory",
-    "factory",
-
-    "ladder",
-    "ladder",
-
-    "staggered",
-    "staggered",
-]
-
-
-SUPPORT_MOTIFS = [
-
-    "circles",
-    "diamonds",
-    "capsules",
-    "checker",
-    "woven",
-]
+    builder = PrimitiveBuilder(
+        region,
+        "factory",
+        splice_color,
+    )
 
 
-def choose_motif():
+    rng = make_rng(
+        seed,
+        "factory",
+        region.id,
+    )
 
-    if (
-        random.random()
-        <
-        AI_MOTIF_WEIGHT
+
+    base_rows = max(
+        1,
+        region.h
+        //
+        2,
+    )
+
+
+    builder.add(
+        "rect",
+
+        region.x,
+
+        region.y
+        +
+        region.h
+        -
+        base_rows,
+
+        region.w,
+        base_rows,
+
+        color_a,
+    )
+
+
+    for col in range(
+        0,
+        region.w,
+        2,
     ):
 
-        return random.choice(
-            AI_MOTIFS
+        builder.add(
+            "triangle_up",
+
+            region.x
+            +
+            col,
+
+            region.y
+            +
+            region.h
+            -
+            base_rows
+            -
+            1,
+
+            1,
+            1,
+
+            color_a,
         )
 
-    return random.choice(
-        SUPPORT_MOTIFS
+
+    tower_count = max(
+        1,
+
+        min(
+            3,
+            region.w
+            //
+            3,
+        ),
+    )
+
+
+    tower_positions = list(
+        range(
+            region.w
+        )
+    )
+
+
+    rng.shuffle(
+        tower_positions
+    )
+
+
+    for index in range(
+        tower_count
+    ):
+
+        col = tower_positions[
+            index
+        ]
+
+
+        tower_height = rng.randint(
+            1,
+
+            max(
+                1,
+                region.h
+                -
+                base_rows,
+            ),
+        )
+
+
+        builder.add(
+            "rect",
+
+            region.x
+            +
+            col,
+
+            region.y
+            +
+            region.h
+            -
+            base_rows
+            -
+            tower_height,
+
+            1,
+            tower_height,
+
+            color_b,
+        )
+
+
+    return builder.items
+
+
+# ============================================================
+# MOTIF: LADDER / CIRCUIT
+# ============================================================
+
+def build_ladder(
+    region,
+    color_a,
+    color_b,
+    splice_color,
+    seed,
+):
+
+    builder = PrimitiveBuilder(
+        region,
+        "ladder",
+        splice_color,
+    )
+
+
+    rng = make_rng(
+        seed,
+        "ladder",
+        region.id,
+    )
+
+
+    vertical = (
+        region.h
+        >=
+        region.w
+    )
+
+
+    if rng.random() < 0.2:
+
+        vertical = (
+            not vertical
+        )
+
+
+    if vertical:
+
+        spine_col = (
+            region.w
+            //
+            2
+        )
+
+
+        builder.add(
+            "rect",
+
+            region.x
+            +
+            spine_col,
+
+            region.y,
+
+            1,
+            region.h,
+
+            color_a,
+        )
+
+
+        for row in range(
+            0,
+            region.h,
+            2,
+        ):
+
+            direction_left = (
+                row
+                %
+                4
+                ==
+                0
+            )
+
+
+            if direction_left:
+
+                width = (
+                    spine_col
+                    +
+                    1
+                )
+
+
+                builder.add(
+                    "rect",
+
+                    region.x,
+
+                    region.y
+                    +
+                    row,
+
+                    width,
+                    1,
+
+                    color_b,
+                )
+
+
+            else:
+
+                width = (
+                    region.w
+                    -
+                    spine_col
+                )
+
+
+                builder.add(
+                    "rect",
+
+                    region.x
+                    +
+                    spine_col,
+
+                    region.y
+                    +
+                    row,
+
+                    width,
+                    1,
+
+                    color_b,
+                )
+
+
+    else:
+
+        spine_row = (
+            region.h
+            //
+            2
+        )
+
+
+        builder.add(
+            "rect",
+
+            region.x,
+
+            region.y
+            +
+            spine_row,
+
+            region.w,
+            1,
+
+            color_a,
+        )
+
+
+        for col in range(
+            0,
+            region.w,
+            2,
+        ):
+
+            direction_up = (
+                col
+                %
+                4
+                ==
+                0
+            )
+
+
+            if direction_up:
+
+                height = (
+                    spine_row
+                    +
+                    1
+                )
+
+
+                builder.add(
+                    "rect",
+
+                    region.x
+                    +
+                    col,
+
+                    region.y,
+
+                    1,
+                    height,
+
+                    color_b,
+                )
+
+
+            else:
+
+                height = (
+                    region.h
+                    -
+                    spine_row
+                )
+
+
+                builder.add(
+                    "rect",
+
+                    region.x
+                    +
+                    col,
+
+                    region.y
+                    +
+                    spine_row,
+
+                    1,
+                    height,
+
+                    color_b,
+                )
+
+
+    return builder.items
+
+
+# ============================================================
+# BUILD ONE REGION
+# ============================================================
+
+def build_region_primitives(
+    region,
+    motif,
+    color_a,
+    color_b,
+    splice_color,
+    seed,
+):
+
+    if motif == "checker":
+
+        return build_checker(
+            region,
+            color_a,
+            color_b,
+            splice_color,
+        )
+
+
+    if motif == "lattice":
+
+        return build_lattice(
+            region,
+            color_a,
+            color_b,
+            splice_color,
+        )
+
+
+    if motif == "pills":
+
+        return build_pills(
+            region,
+            color_a,
+            color_b,
+            splice_color,
+            seed,
+        )
+
+
+    if motif == "stair":
+
+        return build_stair(
+            region,
+            color_a,
+            color_b,
+            splice_color,
+            seed,
+        )
+
+
+    if motif == "factory":
+
+        return build_factory(
+            region,
+            color_a,
+            color_b,
+            splice_color,
+            seed,
+        )
+
+
+    if motif == "ladder":
+
+        return build_ladder(
+            region,
+            color_a,
+            color_b,
+            splice_color,
+            seed,
+        )
+
+
+    return build_circles(
+        region,
+        color_a,
+        color_b,
+        splice_color,
     )
 
 
 # ============================================================
-# 26. MOTIF DISPATCH
+# CREATE COMPOSITION BLUEPRINT
 # ============================================================
 
-def render_motif(
-    canvas,
-    region,
-    motif,
-    small_unit,
-    settings,
-    splice_mask,
-):
-
-    if motif == "factory":
-
-        motif_factory(
-            canvas,
-            region,
-            small_unit,
-            settings,
-            splice_mask,
-        )
-
-    elif motif == "ladder":
-
-        motif_ladder(
-            canvas,
-            region,
-            small_unit,
-            settings,
-            splice_mask,
-        )
-
-    elif motif == "staggered":
-
-        motif_staggered_blocks(
-            canvas,
-            region,
-            small_unit,
-            settings,
-            splice_mask,
-        )
-
-    elif motif == "circles":
-
-        motif_circles(
-            canvas,
-            region,
-            small_unit,
-            settings,
-            splice_mask,
-        )
-
-    elif motif == "diamonds":
-
-        motif_diamonds(
-            canvas,
-            region,
-            small_unit,
-            settings,
-            splice_mask,
-        )
-
-    elif motif == "capsules":
-
-        motif_capsules(
-            canvas,
-            region,
-            small_unit,
-            settings,
-            splice_mask,
-        )
-
-    elif motif == "checker":
-
-        motif_checker(
-            canvas,
-            region,
-            small_unit,
-            settings,
-            splice_mask,
-        )
-
-    else:
-
-        motif_woven(
-            canvas,
-            region,
-            small_unit,
-            settings,
-            splice_mask,
-        )
-
-
-# ============================================================
-# 27. MACRO REGION CONSTRUCTION
-# ============================================================
-
-def build_macro_regions(
+def create_ai_edge_blueprint(
     width,
     height,
-    large_unit,
+    seed,
+    negative_space=15,
+    color_weights=None,
+    shape_weights=None,
+    splice_enabled=True,
 ):
+
+    width = int(
+        width
+    )
+
+    height = int(
+        height
+    )
+
+    seed = int(
+        seed
+    )
+
+
+    if width <= 0 or height <= 0:
+
+        raise ValueError(
+            "Width and height must both be greater than zero."
+        )
+
+
+    negative_space = clamp(
+        float(
+            negative_space
+        ),
+        0,
+        60,
+    )
+
+
+    color_weights = normalize_weights(
+        color_weights,
+        DEFAULT_COLOR_WEIGHTS,
+        minimum=0.0,
+    )
+
+
+    shape_weights = normalize_weights(
+        shape_weights,
+        DEFAULT_SHAPE_WEIGHTS,
+        minimum=1.0,
+    )
+
+
+    # ========================================================
+    # V3.2 — ARBITRARY CANVAS DIMENSIONS
+    # ========================================================
+    #
+    # Always create enough full 25 px cells to cover the
+    # requested output.
+    #
+    # Example:
+    #
+    # width = 1213
+    #
+    # ceil(1213 / 25) = 49 cells
+    #
+    # 49 x 25 = 1225 px internal artwork
+    #
+    # Final output remains exactly 1213 px wide.
+    #
+    # ========================================================
 
     cols = int(
         math.ceil(
             width
             /
-            large_unit
+            GRID
         )
     )
 
@@ -2359,762 +2041,1045 @@ def build_macro_regions(
         math.ceil(
             height
             /
-            large_unit
-        )
-    )
-
-    regions = []
-
-    occupied = np.zeros(
-        (
-            rows,
-            cols,
-        ),
-        dtype=bool,
-    )
-
-    attempts = 0
-
-    while (
-        not occupied.all()
-        and
-        attempts < 800
-    ):
-
-        attempts += 1
-
-        empty = np.argwhere(
-            occupied == False
-        )
-
-        if len(empty) == 0:
-
-            break
-
-        choice_index = random.randrange(
-            len(empty)
-        )
-
-        start_r, start_c = empty[
-            choice_index
-        ]
-
-        span_c = random.choice(
-            [
-                1,
-                1,
-                1,
-                2,
-                2,
-                2,
-                3,
-            ]
-        )
-
-        span_r = random.choice(
-            [
-                1,
-                1,
-                1,
-                2,
-                2,
-                2,
-                3,
-            ]
-        )
-
-        end_c = min(
-            cols,
-            start_c + span_c,
-        )
-
-        end_r = min(
-            rows,
-            start_r + span_r,
-        )
-
-        if occupied[
-            start_r:end_r,
-            start_c:end_c
-        ].any():
-
-            continue
-
-        occupied[
-            start_r:end_r,
-            start_c:end_c
-        ] = True
-
-        x0 = (
-            start_c
-            *
-            large_unit
-        )
-
-        y0 = (
-            start_r
-            *
-            large_unit
-        )
-
-        x1 = min(
-            width,
-            end_c
-            *
-            large_unit,
-        )
-
-        y1 = min(
-            height,
-            end_r
-            *
-            large_unit,
-        )
-
-        regions.append(
-            (
-                x0,
-                y0,
-                x1,
-                y1,
-            )
-        )
-
-    return regions
-
-
-# ============================================================
-# 28. CREAM PAPER
-# ============================================================
-
-def make_paper(
-    width,
-    height,
-):
-
-    base = np.array(
-        hex_to_rgb(
-            PAPER
-        ),
-        dtype=np.float32,
-    )
-
-    h = hi(height)
-    w = hi(width)
-
-    arr = np.empty(
-        (
-            h,
-            w,
-            3,
-        ),
-        dtype=np.float32,
-    )
-
-    arr[:, :] = base
-
-    grain = np.random.normal(
-        0,
-        0.24,
-        (
-            h,
-            w,
-            1,
-        ),
-    )
-
-    arr += grain
-
-    return Image.fromarray(
-        np.clip(
-            arr,
-            0,
-            255,
-        ).astype(
-            np.uint8
+            GRID
         )
     )
 
 
-# ============================================================
-# 29. REGION SETTINGS
-# ============================================================
-
-def create_region_settings():
-
-    family = random.choice(
-        list(
-            PALETTE.keys()
-        )
+    bleed_width = (
+        cols
+        *
+        GRID
     )
 
-    gradient = (
-        random.random()
-        <
-        TRUE_GRADIENT_REGION_PROBABILITY
-    )
-
-    shimmer = (
-        random.random()
-        <
-        SHIMMER_REGION_PROBABILITY
-    )
-
-    splice = (
-        random.random()
-        <
-        SPLICE_REGION_PROBABILITY
-    )
-
-    return {
-
-        "family":
-            family,
-
-        "gradient":
-            gradient,
-
-        "gradient_pair":
-            random.choice(
-                AI_GRADIENTS
-            ),
-
-        # Horizontal / vertical gradients dominate.
-        #
-        # Diagonal remains rarer because the splice already
-        # creates strong diagonal movement.
-
-        "gradient_axis":
-            random.choice(
-                [
-                    "x",
-                    "x",
-                    "x",
-                    "y",
-                    "y",
-                    "diag_down",
-                ]
-            ),
-
-        "shimmer":
-            shimmer,
-
-        "shimmer_phase":
-            random.uniform(
-                0,
-                math.pi * 2,
-            ),
-
-        "splice":
-            splice,
-
-        "splice_color":
-            choose_splice_color(
-                family
-            ),
-    }
-
-
-# ============================================================
-# 30. QUIET GRID OVERPRINT
-# ============================================================
-
-def add_overprint(
-    canvas,
-    width,
-    height,
-    small_unit,
-):
-
-    if random.random() > 0.42:
-
-        return
-
-    family = random.choice(
-        list(
-            PALETTE.keys()
-        )
-    )
-
-    color = palette_color(
-        family,
-        0,
-    )
-
-    overlay = Image.new(
-        "RGBA",
-        canvas.size,
-        (
-            0,
-            0,
-            0,
-            0,
-        ),
-    )
-
-    draw = ImageDraw.Draw(
-        overlay
-    )
-
-    direction = random.choice(
-        [
-            "horizontal",
-            "vertical",
-        ]
-    )
-
-    stripe_count = random.randint(
-        2,
-        4,
-    )
-
-    if direction == "horizontal":
-
-        max_rows = max(
-            1,
-            height
-            //
-            small_unit,
-        )
-
-        start = random.randint(
-            0,
-            max_rows - 1,
-        )
-
-        for i in range(
-            stripe_count
-        ):
-
-            row = (
-                start
-                +
-                i * 2
-            ) % max_rows
-
-            y0 = hi(
-                row
-                *
-                small_unit
-            )
-
-            y1 = hi(
-                (
-                    row + 1
-                )
-                *
-                small_unit
-            )
-
-            draw.rectangle(
-                (
-                    0,
-                    y0,
-                    hi(width),
-                    y1,
-                ),
-                fill=rgba(
-                    color,
-                    random.randint(
-                        10,
-                        24,
-                    ),
-                ),
-            )
-
-    else:
-
-        max_cols = max(
-            1,
-            width
-            //
-            small_unit,
-        )
-
-        start = random.randint(
-            0,
-            max_cols - 1,
-        )
-
-        for i in range(
-            stripe_count
-        ):
-
-            col = (
-                start
-                +
-                i * 2
-            ) % max_cols
-
-            x0 = hi(
-                col
-                *
-                small_unit
-            )
-
-            x1 = hi(
-                (
-                    col + 1
-                )
-                *
-                small_unit
-            )
-
-            draw.rectangle(
-                (
-                    x0,
-                    0,
-                    x1,
-                    hi(height),
-                ),
-                fill=rgba(
-                    color,
-                    random.randint(
-                        10,
-                        24,
-                    ),
-                ),
-            )
-
-    canvas.alpha_composite(
-        overlay
+    bleed_height = (
+        rows
+        *
+        GRID
     )
 
 
-# ============================================================
-# 31. FINAL PRINT GRAIN
-# ============================================================
-
-def apply_print_texture(
-    image,
-):
-
-    arr = np.array(
-        image
-    ).astype(
-        np.float32
+    regions = build_baseline_regions(
+        cols,
+        rows,
+        seed,
     )
 
-    height, width = arr.shape[:2]
-
-    fine_noise = np.random.normal(
-        0,
-        PRINT_GRAIN,
-        (
-            height,
-            width,
-            1,
-        ),
-    )
-
-    arr += fine_noise
-
-    return Image.fromarray(
-        np.clip(
-            arr,
-            0,
-            255,
-        ).astype(
-            np.uint8
-        )
-    )
-
-
-# ============================================================
-# 32. MAIN GENERATOR
-# ============================================================
-
-def generate_ai_edge_pattern(
-    width,
-    height,
-):
-
-    paper = make_paper(
-        width,
-        height,
-    )
-
-    canvas = paper.convert(
-        "RGBA"
-    )
 
     (
-        large_unit,
-        small_unit,
-        subdivision,
-    ) = choose_grid(
-        width,
-        height,
+        omitted_region_ids,
+        actual_macro_omission,
+    ) = choose_omitted_regions(
+        regions,
+        cols,
+        rows,
+        negative_space,
     )
 
-    # --------------------------------------------------------
-    # GLOBAL GRID-ALIGNED SPLICE
-    # --------------------------------------------------------
 
-    splice_direction = random.choice(
-        [
-            "down",
-            "up",
-        ]
+    # ========================================================
+    # SPLICE
+    # ========================================================
+    #
+    # Build splice using the bleed dimensions rather than the
+    # cropped dimensions so the splice behaves as though the
+    # pattern continues beyond the canvas edge.
+    #
+    # ========================================================
+
+    splice_rng = make_rng(
+        seed,
+        "splice",
     )
 
-    splice_position = random.uniform(
-        0.24,
-        0.69,
+
+    splice_direction = (
+        "down"
+        if splice_rng.random() < 0.5
+        else "up"
     )
 
-    splice_mask = create_splice_mask(
-        width,
-        height,
-        small_unit,
-        splice_direction,
-        splice_position,
+
+    splice_position = splice_rng.uniform(
+        0.28,
+        0.72,
     )
 
-    # --------------------------------------------------------
-    # MACRO PATCHWORK
-    # --------------------------------------------------------
 
-    regions = build_macro_regions(
-        width,
-        height,
-        large_unit,
-    )
+    primitives = []
 
-    previous_motif = None
-    previous_settings = None
-
-    gradient_regions = 0
-    shimmer_regions = 0
-    splice_regions = 0
 
     for region in regions:
 
-        # ----------------------------------------------------
-        # REPEAT MOTIFS FREQUENTLY
-        # ----------------------------------------------------
-        #
-        # This is one of the most important parts of the
-        # successful textile feeling.
-        #
-        # ----------------------------------------------------
-
         if (
-            previous_motif is not None
-            and
-            random.random() < 0.50
+            region.id
+            in
+            omitted_region_ids
         ):
 
-            motif = previous_motif
+            continue
 
-        else:
 
-            motif = choose_motif()
-
-        # ----------------------------------------------------
-        # OCCASIONALLY REPEAT COLOR LANGUAGE TOO
-        # ----------------------------------------------------
-
-        if (
-            previous_settings is not None
-            and
-            random.random() < 0.28
-        ):
-
-            settings = dict(
-                previous_settings
-            )
-
-            settings[
-                "shimmer_phase"
-            ] += random.uniform(
-                -0.65,
-                0.65,
-            )
-
-        else:
-
-            settings = create_region_settings()
-
-        if settings["gradient"]:
-
-            gradient_regions += 1
-
-        if settings["shimmer"]:
-
-            shimmer_regions += 1
-
-        if settings["splice"]:
-
-            splice_regions += 1
-
-        render_motif(
-            canvas,
+        motif = choose_region_motif(
             region,
-            motif,
-            small_unit,
-            settings,
-            splice_mask,
+            shape_weights,
         )
 
-        previous_motif = motif
-        previous_settings = settings
 
-    # --------------------------------------------------------
-    # QUIET PRINT OVERLAY
-    # --------------------------------------------------------
+        (
+            color_a,
+            color_b,
+            splice_color,
+        ) = choose_region_colors(
+            region,
+            color_weights,
+        )
 
-    add_overprint(
-        canvas,
-        width,
-        height,
-        small_unit,
+
+        region_primitives = (
+            build_region_primitives(
+                region,
+                motif,
+                color_a,
+                color_b,
+                splice_color,
+                seed,
+            )
+        )
+
+
+        primitives.extend(
+            region_primitives
+        )
+
+
+    return CompositionBlueprint(
+        width=width,
+        height=height,
+
+        grid=GRID,
+
+        seed=seed,
+
+        background=BACKGROUND,
+
+        grid_cols=cols,
+        grid_rows=rows,
+
+        bleed_width=bleed_width,
+        bleed_height=bleed_height,
+
+        negative_space=(
+            negative_space
+        ),
+
+        macro_omission=(
+            actual_macro_omission
+        ),
+
+        color_weights=(
+            color_weights
+        ),
+
+        shape_weights=(
+            shape_weights
+        ),
+
+        splice_enabled=(
+            bool(
+                splice_enabled
+            )
+        ),
+
+        splice_direction=(
+            splice_direction
+        ),
+
+        splice_position=(
+            splice_position
+        ),
+
+        regions=regions,
+
+        omitted_region_ids=sorted(
+            list(
+                omitted_region_ids
+            )
+        ),
+
+        primitives=primitives,
     )
 
-    # --------------------------------------------------------
-    # DOWNSAMPLE ONCE
-    # --------------------------------------------------------
 
-    result = canvas.convert(
-        "RGB"
-    ).resize(
+# ============================================================
+# SPLICE GEOMETRY
+# ============================================================
+
+def splice_polygon(
+    width,
+    height,
+    direction,
+    position,
+):
+
+    span = (
+        width
+        +
+        height
+    )
+
+
+    if direction == "down":
+
+        intercept = (
+            position
+            *
+            span
+            -
+            width
+        )
+
+
+        return [
+            (
+                0,
+                intercept,
+            ),
+
+            (
+                width,
+                width
+                +
+                intercept,
+            ),
+
+            (
+                width,
+                height
+                +
+                width,
+            ),
+
+            (
+                0,
+                height
+                +
+                width,
+            ),
+        ]
+
+
+    intercept = (
+        position
+        *
+        span
+    )
+
+
+    return [
+        (
+            0,
+            -height,
+        ),
+
         (
             width,
-            height,
+            -height,
+        ),
+
+        (
+            width,
+            intercept
+            -
+            width,
+        ),
+
+        (
+            0,
+            intercept,
+        ),
+    ]
+
+
+# ============================================================
+# DRAW PRIMITIVE INTO MASK
+# ============================================================
+
+def draw_primitive_mask(
+    draw,
+    primitive,
+    scale=1,
+):
+
+    x0 = (
+        primitive.x
+        *
+        scale
+    )
+
+    y0 = (
+        primitive.y
+        *
+        scale
+    )
+
+    x1 = (
+        primitive.x
+        +
+        primitive.w
+    ) * scale
+
+    y1 = (
+        primitive.y
+        +
+        primitive.h
+    ) * scale
+
+
+    bbox = [
+        x0,
+        y0,
+        x1,
+        y1,
+    ]
+
+
+    if primitive.type == "rect":
+
+        draw.rectangle(
+            bbox,
+            fill=255,
+        )
+
+        return
+
+
+    if primitive.type == "circle":
+
+        size = min(
+            primitive.w,
+            primitive.h,
+        ) * scale
+
+
+        cx = (
+            x0
+            +
+            x1
+        ) / 2
+
+        cy = (
+            y0
+            +
+            y1
+        ) / 2
+
+
+        radius = (
+            size
+            /
+            2
+        )
+
+
+        draw.ellipse(
+            [
+                cx - radius,
+                cy - radius,
+                cx + radius,
+                cy + radius,
+            ],
+            fill=255,
+        )
+
+        return
+
+
+    if primitive.type == "diamond":
+
+        cx = (
+            x0
+            +
+            x1
+        ) / 2
+
+        cy = (
+            y0
+            +
+            y1
+        ) / 2
+
+
+        draw.polygon(
+            [
+                (
+                    cx,
+                    y0,
+                ),
+
+                (
+                    x1,
+                    cy,
+                ),
+
+                (
+                    cx,
+                    y1,
+                ),
+
+                (
+                    x0,
+                    cy,
+                ),
+            ],
+            fill=255,
+        )
+
+        return
+
+
+    if primitive.type == "triangle_up":
+
+        draw.polygon(
+            [
+                (
+                    (
+                        x0
+                        +
+                        x1
+                    )
+                    /
+                    2,
+
+                    y0,
+                ),
+
+                (
+                    x1,
+                    y1,
+                ),
+
+                (
+                    x0,
+                    y1,
+                ),
+            ],
+            fill=255,
+        )
+
+        return
+
+
+    if primitive.type == "triangle_down":
+
+        draw.polygon(
+            [
+                (
+                    x0,
+                    y0,
+                ),
+
+                (
+                    x1,
+                    y0,
+                ),
+
+                (
+                    (
+                        x0
+                        +
+                        x1
+                    )
+                    /
+                    2,
+
+                    y1,
+                ),
+            ],
+            fill=255,
+        )
+
+        return
+
+
+    if primitive.type == "capsule":
+
+        radius = (
+            min(
+                primitive.w,
+                primitive.h,
+            )
+            *
+            scale
+            /
+            2
+        )
+
+
+        draw.rounded_rectangle(
+            bbox,
+            radius=radius,
+            fill=255,
+        )
+
+        return
+
+
+    draw.rectangle(
+        bbox,
+        fill=255,
+    )
+
+
+# ============================================================
+# RENDER BLUEPRINT TO PNG
+# ============================================================
+
+def render_blueprint_png(
+    blueprint,
+):
+
+    SCALE = 2
+
+
+    # ========================================================
+    # RENDER BLEED CANVAS
+    # ========================================================
+    #
+    # Artwork is rendered on the complete 25 px construction
+    # grid first.
+    #
+    # ========================================================
+
+    render_width = (
+        blueprint.bleed_width
+    )
+
+    render_height = (
+        blueprint.bleed_height
+    )
+
+
+    canvas = Image.new(
+        "RGB",
+
+        (
+            render_width
+            *
+            SCALE,
+
+            render_height
+            *
+            SCALE,
+        ),
+
+        blueprint.background,
+    )
+
+
+    splice_mask = None
+
+
+    if blueprint.splice_enabled:
+
+        splice_mask = Image.new(
+            "L",
+            canvas.size,
+            0,
+        )
+
+
+        splice_draw = ImageDraw.Draw(
+            splice_mask
+        )
+
+
+        polygon = splice_polygon(
+            render_width,
+            render_height,
+            blueprint.splice_direction,
+            blueprint.splice_position,
+        )
+
+
+        polygon = [
+            (
+                x * SCALE,
+                y * SCALE,
+            )
+            for x, y
+            in polygon
+        ]
+
+
+        splice_draw.polygon(
+            polygon,
+            fill=255,
+        )
+
+
+    # ========================================================
+    # DRAW PRIMITIVES
+    # ========================================================
+
+    for primitive in blueprint.primitives:
+
+        shape_mask = Image.new(
+            "L",
+            canvas.size,
+            0,
+        )
+
+
+        shape_draw = ImageDraw.Draw(
+            shape_mask
+        )
+
+
+        draw_primitive_mask(
+            shape_draw,
+            primitive,
+            scale=SCALE,
+        )
+
+
+        primary_layer = Image.new(
+            "RGB",
+            canvas.size,
+            primitive.color,
+        )
+
+
+        canvas.paste(
+            primary_layer,
+            (
+                0,
+                0,
+            ),
+            shape_mask,
+        )
+
+
+        if (
+            blueprint.splice_enabled
+            and
+            primitive.splice_color
+            and
+            splice_mask is not None
+        ):
+
+            intersection = Image.new(
+                "L",
+                canvas.size,
+                0,
+            )
+
+
+            shape_pixels = (
+                shape_mask.load()
+            )
+
+            splice_pixels = (
+                splice_mask.load()
+            )
+
+            intersection_pixels = (
+                intersection.load()
+            )
+
+
+            x0 = max(
+                0,
+                int(
+                    primitive.x
+                    *
+                    SCALE
+                ),
+            )
+
+
+            y0 = max(
+                0,
+                int(
+                    primitive.y
+                    *
+                    SCALE
+                ),
+            )
+
+
+            x1 = min(
+                canvas.width,
+
+                int(
+                    (
+                        primitive.x
+                        +
+                        primitive.w
+                    )
+                    *
+                    SCALE
+                )
+                +
+                2,
+            )
+
+
+            y1 = min(
+                canvas.height,
+
+                int(
+                    (
+                        primitive.y
+                        +
+                        primitive.h
+                    )
+                    *
+                    SCALE
+                )
+                +
+                2,
+            )
+
+
+            for y in range(
+                y0,
+                y1,
+            ):
+
+                for x in range(
+                    x0,
+                    x1,
+                ):
+
+                    if (
+                        shape_pixels[
+                            x,
+                            y
+                        ]
+                        and
+                        splice_pixels[
+                            x,
+                            y
+                        ]
+                    ):
+
+                        intersection_pixels[
+                            x,
+                            y
+                        ] = 255
+
+
+            splice_layer = Image.new(
+                "RGB",
+                canvas.size,
+                primitive.splice_color,
+            )
+
+
+            canvas.paste(
+                splice_layer,
+                (
+                    0,
+                    0,
+                ),
+                intersection,
+            )
+
+
+    # ========================================================
+    # DOWNSAMPLE BLEED ARTWORK
+    # ========================================================
+
+    canvas = canvas.resize(
+        (
+            render_width,
+            render_height,
         ),
         Image.Resampling.LANCZOS,
     )
 
-    result = apply_print_texture(
-        result
+
+    # ========================================================
+    # CROP TO REQUESTED ARTBOARD
+    # ========================================================
+    #
+    # This is the V3.2 behavior:
+    #
+    # Complete 25 px cells continue past the crop.
+    #
+    # The art director gets exactly the requested pixel size.
+    #
+    # ========================================================
+
+    canvas = canvas.crop(
+        (
+            0,
+            0,
+            blueprint.width,
+            blueprint.height,
+        )
     )
 
+
+    return canvas
+
+
+# ============================================================
+# PUBLIC GENERATOR
+# ============================================================
+
+def generate_ai_edge_pattern(
+    width=1200,
+    height=1600,
+    seed=48391027,
+    negative_space=15,
+    color_weights=None,
+    shape_weights=None,
+    splice_enabled=True,
+):
+
+    blueprint = create_ai_edge_blueprint(
+        width=width,
+        height=height,
+        seed=seed,
+        negative_space=negative_space,
+        color_weights=color_weights,
+        shape_weights=shape_weights,
+        splice_enabled=splice_enabled,
+    )
+
+
+    image = render_blueprint_png(
+        blueprint
+    )
+
+
     metadata = {
+        "version":
+            "AI Edge V3.2",
 
         "seed":
-            SEED,
+            blueprint.seed,
 
-        "small_unit":
-            small_unit,
+        "width":
+            blueprint.width,
 
-        "large_unit":
-            large_unit,
+        "height":
+            blueprint.height,
 
-        "subdivision":
-            subdivision,
+        "grid":
+            GRID,
+
+        "grid_cols":
+            blueprint.grid_cols,
+
+        "grid_rows":
+            blueprint.grid_rows,
+
+        "bleed_width":
+            blueprint.bleed_width,
+
+        "bleed_height":
+            blueprint.bleed_height,
+
+        "background":
+            BACKGROUND,
+
+        "negative_space":
+            blueprint.negative_space,
+
+        "macro_omission":
+            blueprint.macro_omission,
 
         "region_count":
-            len(regions),
+            len(
+                blueprint.regions
+            ),
 
-        "gradient_regions":
-            gradient_regions,
+        "omitted_region_count":
+            len(
+                blueprint.omitted_region_ids
+            ),
 
-        "shimmer_regions":
-            shimmer_regions,
+        "primitive_count":
+            len(
+                blueprint.primitives
+            ),
 
-        "splice_regions":
-            splice_regions,
+        "splice_enabled":
+            blueprint.splice_enabled,
 
         "splice_direction":
-            splice_direction,
+            blueprint.splice_direction,
+
+        "splice_position":
+            blueprint.splice_position,
+
+        "color_weights":
+            blueprint.color_weights,
+
+        "shape_weights":
+            blueprint.shape_weights,
     }
 
+
     return (
-        result,
+        image,
         metadata,
+        blueprint,
     )
 
 
 # ============================================================
-# 33. LOCAL VS CODE RUNNER
+# BLUEPRINT -> DICTIONARY
+# ============================================================
+
+def blueprint_to_dict(
+    blueprint,
+):
+
+    return asdict(
+        blueprint
+    )
+
+
+# ============================================================
+# LOCAL TEST
 # ============================================================
 
 if __name__ == "__main__":
 
-    art, info = generate_ai_edge_pattern(
-        OUTPUT_WIDTH,
-        OUTPUT_HEIGHT,
+    TEST_SEED = 48391027
+
+
+    # Deliberately NOT multiples of 25.
+    #
+    # This confirms that V3.2 is doing the bleed/crop behavior.
+
+    TEST_WIDTH = 1213
+    TEST_HEIGHT = 743
+
+
+    image, info, blueprint = (
+        generate_ai_edge_pattern(
+            width=TEST_WIDTH,
+
+            height=TEST_HEIGHT,
+
+            seed=TEST_SEED,
+
+            negative_space=15,
+
+            color_weights={
+                "Brown": 14,
+                "Pink": 14,
+                "Red": 18,
+                "Yellow": 12,
+                "Blue": 18,
+                "Gray": 10,
+                "Ice Blue": 14,
+            },
+
+            shape_weights={
+                "Checkerboard": 7,
+                "Lattice": 5,
+                "Stair Step": 5,
+                "Pills": 4,
+            },
+
+            splice_enabled=True,
+        )
     )
 
-    output_id = random.randint(
-        0,
-        999_999_999,
-    )
 
     filename = (
-        f"ai_edge_pattern_v2_"
-        f"{output_id}.png"
+        f"ai_edge_v3_2_"
+        f"{TEST_SEED}_"
+        f"{TEST_WIDTH}x"
+        f"{TEST_HEIGHT}.png"
     )
 
-    art.save(
+
+    image.save(
         filename
     )
+
 
     print()
 
     print(
-        "======================================"
+        "========================================"
     )
 
     print(
-        " AI EDGE PATTERN v2 GENERATED"
+        " AI EDGE V3.2"
     )
 
     print(
-        "======================================"
+        "========================================"
     )
 
     print(
-        f" Seed:             "
+        f" Seed:               "
         f"{info['seed']}"
     )
 
     print(
-        f" Size:             "
-        f"{OUTPUT_WIDTH} x "
-        f"{OUTPUT_HEIGHT}"
+        f" Requested size:     "
+        f"{info['width']} x "
+        f"{info['height']}"
     )
 
     print(
-        f" Small grid:       "
-        f"{info['small_unit']} px"
+        f" Construction grid:  "
+        f"{info['grid_cols']} x "
+        f"{info['grid_rows']} cells"
     )
 
     print(
-        f" Large grid:       "
-        f"{info['large_unit']} px"
+        f" Internal bleed:     "
+        f"{info['bleed_width']} x "
+        f"{info['bleed_height']} px"
     )
 
     print(
-        f" Macro regions:    "
+        f" Grid:               "
+        f"{info['grid']} px"
+    )
+
+    print(
+        f" Negative space:     "
+        f"{info['negative_space']}%"
+    )
+
+    print(
+        f" Regions:            "
         f"{info['region_count']}"
     )
 
     print(
-        f" True gradients:   "
-        f"{info['gradient_regions']}"
+        f" Primitives:         "
+        f"{info['primitive_count']}"
     )
 
     print(
-        f" Shimmer regions:  "
-        f"{info['shimmer_regions']}"
-    )
-
-    print(
-        f" Splice regions:   "
-        f"{info['splice_regions']}"
-    )
-
-    print(
-        f" Splice direction: "
-        f"{info['splice_direction']}"
-    )
-
-    print(
-        f" File:             "
+        f" Output file:        "
         f"{filename}"
     )
 
     print(
-        "======================================"
+        " Gradients:          OFF"
+    )
+
+    print(
+        " Shimmer:            OFF"
+    )
+
+    print(
+        " Grain:              OFF"
+    )
+
+    print(
+        "========================================"
     )
